@@ -127,12 +127,15 @@ const appState = {
   tasks: loadTasks(),
   modalOpen: false,
   editingId: null,
+  editingDate: null,
   toast: "",
   activeTab: "day",
   focusFilter: "all",
   clientFilter: "all",
   splashDone: sessionStorage.getItem("assiya.splash.done") === "true",
 };
+
+let toastTimer = null;
 
 function loadTasks() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -477,7 +480,7 @@ function ActiveTaskCard(task) {
 function TaskRow(task, dateISO, allowOpen = false) {
   const completed = isCompleted(task, dateISO);
   return `
-    <article class="task-row ${completed ? "done" : ""}" ${allowOpen ? `data-open-task="${task.id}"` : ""}>
+    <article class="task-row ${completed ? "done" : ""}" ${allowOpen ? `data-open-task="${task.id}" data-open-date="${dateISO}"` : ""}>
       <time>${task.allDay ? "Весь день" : task.start}</time>
       <div class="task-main">
         <span>${escapeHTML(task.title)}</span>
@@ -700,7 +703,15 @@ function TaskModal() {
   if (!appState.modalOpen) return "";
 
   const task = appState.editingId ? appState.tasks.find((item) => item.id === appState.editingId) : null;
-  const value = task || {
+  const isRecurringEdit = Boolean(task && task.repeat !== "none");
+  const occurrenceDate = task ? appState.editingDate || task.occurrenceDate || appState.selectedDate : appState.selectedDate;
+  const value = task
+    ? {
+        ...task,
+        date: isRecurringEdit ? occurrenceDate : task.date,
+        repeat: isRecurringEdit ? "none" : task.repeat,
+      }
+    : {
     title: "",
     category: "work",
     client: "",
@@ -723,6 +734,12 @@ function TaskModal() {
           <h2>${task ? "Редактировать задачу" : "Создание задачи"}</h2>
           <button class="icon-button" type="button" data-action="close-modal" aria-label="Закрыть">${Icon("x")}</button>
         </header>
+
+        ${
+          isRecurringEdit
+            ? `<p class="modal-note">Это повторяющаяся задача. Сохранение изменит только выбранное повторение, серия останется прежней.</p>`
+            : ""
+        }
 
         <label class="field typewriter-line">
           <span>Название задачи</span>
@@ -777,11 +794,12 @@ function TaskModal() {
 
         <label class="field">
           <span>Повтор</span>
-          <select name="repeat">
+          <select name="repeat" ${isRecurringEdit ? "disabled" : ""}>
             <option value="none" ${value.repeat === "none" ? "selected" : ""}>Нет</option>
             <option value="weekly" ${value.repeat === "weekly" ? "selected" : ""}>Каждую неделю</option>
             <option value="monthly" ${value.repeat === "monthly" ? "selected" : ""}>Каждый месяц</option>
           </select>
+          ${isRecurringEdit ? `<input type="hidden" name="repeat" value="none" />` : ""}
         </label>
 
         <input type="hidden" name="focus" value="${value.focus}" />
@@ -800,7 +818,7 @@ function TaskModal() {
         </label>
 
         <button class="save-seal" type="submit">Сохранить</button>
-        ${task ? `<button class="delete-task" type="button" data-delete-task="${task.id}">Удалить задачу</button>` : ""}
+        ${task ? `<button class="delete-task" type="button" data-delete-task="${task.id}" data-delete-date="${occurrenceDate}">${isRecurringEdit ? "Удалить это повторение" : "Удалить задачу"}</button>` : ""}
       </form>
     </div>
   `;
@@ -811,6 +829,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       appState.modalOpen = true;
       appState.editingId = null;
+      appState.editingDate = null;
       render();
     });
   });
@@ -820,6 +839,7 @@ function bindEvents() {
       if (event.target === element || element.matches("button")) {
         appState.modalOpen = false;
         appState.editingId = null;
+        appState.editingDate = null;
         render();
       }
     });
@@ -912,17 +932,29 @@ function bindEvents() {
 
   document.querySelectorAll("[data-delete-task]").forEach((button) => {
     button.addEventListener("click", () => {
-      appState.tasks = appState.tasks.filter((task) => task.id !== button.dataset.deleteTask);
+      const task = appState.tasks.find((item) => item.id === button.dataset.deleteTask);
+      const deleteDate = button.dataset.deleteDate || appState.selectedDate;
+
+      if (task && task.repeat !== "none") {
+        appState.tasks = appState.tasks.map((item) =>
+          item.id === task.id ? addRecurrenceException(item, deleteDate) : item,
+        );
+      } else {
+        appState.tasks = appState.tasks.filter((item) => item.id !== button.dataset.deleteTask);
+      }
+
       saveTasks();
       appState.modalOpen = false;
       appState.editingId = null;
-      showToast("Задача убрана из плана. В расписании стало просторнее.");
+      appState.editingDate = null;
+      showToast(task?.repeat !== "none" ? "Это повторение убрано из плана. Серия осталась на месте." : "Задача убрана из плана. В расписании стало просторнее.");
     });
   });
 
   document.querySelectorAll("[data-open-task]").forEach((row) => {
     row.addEventListener("click", () => {
       appState.editingId = row.dataset.openTask;
+      appState.editingDate = row.dataset.openDate || appState.selectedDate;
       appState.modalOpen = true;
       render();
     });
@@ -1009,6 +1041,8 @@ function handleTaskSubmit(event) {
   const date = data.get("date");
   const category = normalizeCategory(data.get("category"));
   const existingTask = appState.editingId ? appState.tasks.find((item) => item.id === appState.editingId) : null;
+  const editingDate = appState.editingDate || existingTask?.date || date;
+  const isRecurringEdit = Boolean(existingTask && existingTask.repeat !== "none");
   const reminderAt = data.get("reminderEnabled") ? String(data.get("reminderAt") || "").trim() : "";
   const allDay = Boolean(data.get("allDay"));
   const start = allDay ? "00:00" : normalizeTime(data.get("start")) || "09:00";
@@ -1026,7 +1060,7 @@ function handleTaskSubmit(event) {
   }
 
   const task = normalizeTask({
-    id: appState.editingId || crypto.randomUUID(),
+    id: isRecurringEdit ? crypto.randomUUID() : appState.editingId || crypto.randomUUID(),
     title,
     category,
     client: category === "work" ? String(data.get("client") || "").trim() : "",
@@ -1034,19 +1068,24 @@ function handleTaskSubmit(event) {
     start,
     end,
     allDay,
-    repeat: data.get("repeat"),
+    repeat: isRecurringEdit ? "none" : data.get("repeat"),
     focus: data.get("focus"),
     care: Boolean(data.get("care")),
     reminderAt,
     reminderDone: existingTask?.reminderAt === reminderAt ? Boolean(existingTask?.reminderDone) : false,
     snoozedUntil: existingTask?.reminderAt === reminderAt ? existingTask?.snoozedUntil || "" : "",
-    completedDates: existingTask?.completedDates || [],
-    recurrenceExceptionDates: existingTask?.recurrenceExceptionDates || [],
-    sourceTaskId: existingTask?.sourceTaskId || "",
+    completedDates: existingTask && isCompleted(existingTask, editingDate) ? [date] : existingTask?.completedDates || [],
+    recurrenceExceptionDates: isRecurringEdit ? [] : existingTask?.recurrenceExceptionDates || [],
+    sourceTaskId: isRecurringEdit ? existingTask.id : existingTask?.sourceTaskId || "",
     createdAt: existingTask?.createdAt || Date.now(),
   });
 
-  if (appState.editingId) {
+  if (isRecurringEdit) {
+    appState.tasks = [
+      ...appState.tasks.map((item) => (item.id === existingTask.id ? addRecurrenceException(item, editingDate) : item)),
+      task,
+    ];
+  } else if (appState.editingId) {
     appState.tasks = appState.tasks.map((item) => (item.id === appState.editingId ? task : item));
   } else {
     appState.tasks = [...appState.tasks, task];
@@ -1056,6 +1095,7 @@ function handleTaskSubmit(event) {
   appState.selectedDate = date;
   appState.modalOpen = false;
   appState.editingId = null;
+  appState.editingDate = null;
 
   const dayTasks = getTasksForDate(date);
   requestNotificationPermission(task.reminderAt);
@@ -1077,11 +1117,26 @@ function toggleComplete(taskId, dateISO) {
 
 function showToast(message) {
   appState.toast = message;
-  render();
-  window.setTimeout(() => {
-    appState.toast = "";
+  const modalForm = document.getElementById("task-form");
+
+  if (appState.modalOpen && modalForm) {
+    updateToastElement();
+  } else {
     render();
+  }
+
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    appState.toast = "";
+    updateToastElement();
   }, 2600);
+}
+
+function updateToastElement() {
+  const toast = document.querySelector(".toast");
+  if (!toast) return;
+  toast.textContent = appState.toast;
+  toast.classList.toggle("show", Boolean(appState.toast));
 }
 
 function requestNotificationPermission(reminderAt) {
@@ -1126,6 +1181,7 @@ function getTasksForDate(dateISO) {
 }
 
 function occursOn(task, dateISO) {
+  if (task.recurrenceExceptionDates?.includes(dateISO)) return false;
   if (task.date === dateISO) return true;
   if (task.repeat === "none") return false;
 
@@ -1142,6 +1198,13 @@ function occursOn(task, dateISO) {
   }
 
   return false;
+}
+
+function addRecurrenceException(task, dateISO) {
+  if (!isISODate(dateISO)) return task;
+  const recurrenceExceptionDates = new Set(task.recurrenceExceptionDates || []);
+  recurrenceExceptionDates.add(dateISO);
+  return { ...task, recurrenceExceptionDates: [...recurrenceExceptionDates] };
 }
 
 function getStats(tasks) {
