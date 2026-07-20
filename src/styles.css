@@ -769,6 +769,19 @@ svg {
   white-space: nowrap;
 }
 
+.reminder-note {
+  margin: -6px 0 16px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(196, 168, 108, 0.45);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(196, 168, 108, 0.1);
+  font-family: var(--serif);
+  font-size: 16px;
+  font-style: italic;
+  line-height: 1.3;
+}
+
 .mini-icon,
 .category-icon {
   width: 30px;
@@ -1023,11 +1036,19 @@ svg {
   padding: 12px;
   background: rgba(255, 246, 235, 0.36);
   text-align: left;
+  cursor: pointer;
 }
 
 .week-cell.today {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px rgba(196, 168, 108, 0.28);
+}
+
+.week-cell.drag-over,
+.month-day.drag-over {
+  border-color: var(--accent);
+  background: rgba(196, 168, 108, 0.16);
+  box-shadow: inset 0 0 0 2px rgba(196, 168, 108, 0.25);
 }
 
 .week-cell header {
@@ -1057,6 +1078,11 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: grab;
+}
+
+.calendar-task.is-dragging {
+  opacity: 0.45;
 }
 
 .week-cell p span {
@@ -1190,6 +1216,7 @@ svg {
   text-align: left;
   overflow: visible;
   transition: box-shadow 180ms ease, border-color 180ms ease;
+  cursor: pointer;
 }
 
 .month-day:hover {
@@ -1279,6 +1306,7 @@ svg {
   color: var(--text);
   font-size: 11px;
   line-height: 1.24;
+  cursor: grab;
 }
 
 .month-task-list span {
@@ -1368,6 +1396,110 @@ svg {
   font-size: 17px;
   font-style: italic;
   line-height: 1.3;
+}
+
+.gentle-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 108px;
+  z-index: 28;
+  width: min(680px, calc(100vw - 34px));
+  max-height: min(620px, calc(100vh - 140px));
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 10px;
+  background: rgba(255, 246, 235, 0.97);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  animation: modalIn 220ms ease both;
+}
+
+.gentle-panel > div:first-child > span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gentle-panel h2 {
+  margin: 5px 0 7px;
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.gentle-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 18px;
+  font-style: italic;
+  line-height: 1.32;
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.panel-actions button,
+.overload-list button {
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 999px;
+  padding: 9px 12px;
+  background: rgba(245, 230, 211, 0.72);
+  color: var(--text);
+}
+
+.panel-actions button:first-child,
+.overload-list button {
+  background: var(--text);
+  color: var(--accent);
+}
+
+.overload-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.overload-list article {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(43, 58, 74, 0.1);
+  border-radius: 8px;
+  background: rgba(245, 230, 211, 0.44);
+}
+
+.overload-list article.low-focus {
+  border-color: rgba(196, 168, 108, 0.56);
+  background: rgba(196, 168, 108, 0.13);
+}
+
+.overload-list span,
+.overload-list small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.overload-list b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overload-list small {
+  grid-column: 2 / 3;
+  white-space: normal;
 }
 
 .field {
@@ -1761,6 +1893,24 @@ svg {
   .modal-backdrop {
     align-items: end;
     padding: 0;
+  }
+
+  .gentle-panel {
+    bottom: 92px;
+    max-height: calc(100vh - 120px);
+    padding: 15px;
+  }
+
+  .panel-actions {
+    display: grid;
+  }
+
+  .overload-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .overload-list small {
+    grid-column: auto;
   }
 
   .task-modal {

@@ -128,6 +128,9 @@ const appState = {
   modalOpen: false,
   editingId: null,
   editingDate: null,
+  reminderPromptId: null,
+  overloadDate: null,
+  pendingMove: null,
   toast: "",
   activeTab: "day",
   focusFilter: "all",
@@ -209,6 +212,9 @@ function render() {
     <main class="shell ${appState.splashDone ? "is-visible" : ""}">
       ${appState.view === "day" ? DayScreen() : appState.view === "week" ? WeekScreen() : appState.view === "month" ? MonthScreen() : Dashboard()}
       ${TaskModal()}
+      ${ReminderPanel()}
+      ${OverloadPanel()}
+      ${MoveConfirmPanel()}
       <button class="seal-button floating-add" type="button" data-action="open-modal" aria-label="Добавить задачу">
         <span>+</span>
       </button>
@@ -523,6 +529,7 @@ function CategoryIcon(task) {
 
 function ReminderLabel(task) {
   if (!task.reminderAt) return "";
+  if (task.snoozedUntil) return `<small class="reminder-label">Отложено до ${formatReminderText(task.snoozedUntil)}</small>`;
   return `<small class="reminder-label">${task.reminderDone ? "Напоминание отправлено" : `Напомнить ${formatReminderText(task.reminderAt)}`}</small>`;
 }
 
@@ -713,6 +720,83 @@ function AirBlock(block) {
   `;
 }
 
+function ReminderPanel() {
+  if (!appState.reminderPromptId) return "";
+  const task = appState.tasks.find((item) => item.id === appState.reminderPromptId);
+  if (!task) return "";
+
+  return `
+    <section class="gentle-panel reminder-panel" role="dialog" aria-label="Напоминание">
+      <div>
+        <span>АССИЯ напоминает</span>
+        <h2>${escapeHTML(task.title)}</h2>
+        ${ClientLabel(task)}
+        <p>Можно заняться сейчас или мягко отложить напоминание.</p>
+      </div>
+      <div class="panel-actions">
+        <button type="button" data-snooze-reminder="10m" data-reminder-task="${task.id}">Через 10 минут</button>
+        <button type="button" data-snooze-reminder="1h" data-reminder-task="${task.id}">Через 1 час</button>
+        <button type="button" data-snooze-reminder="tomorrow" data-reminder-task="${task.id}">Завтра утром</button>
+        <button type="button" data-action="dismiss-reminder">Я увидела</button>
+      </div>
+    </section>
+  `;
+}
+
+function OverloadPanel() {
+  if (!appState.overloadDate) return "";
+  const tasks = getTasksForDate(appState.overloadDate).sort((a, b) => focusWeight(b.focus) - focusWeight(a.focus) || compareTaskTime(a, b));
+  if (tasks.length <= 5) return "";
+  const targetDate = findNearestLightDay(appState.overloadDate);
+
+  return `
+    <section class="gentle-panel overload-panel" role="dialog" aria-label="Предложение переноса">
+      <div>
+        <span>День стал насыщенным</span>
+        <h2>${formatDateShort(parseISO(appState.overloadDate))}: ${tasks.length} ${declOfNum(tasks.length, ["задача", "задачи", "задач"])}</h2>
+        <p>Можно перенести одну из задач на ${formatDateShort(parseISO(targetDate))}. Я особенно подсветила спокойные задачи.</p>
+      </div>
+      <div class="overload-list">
+        ${tasks
+          .map(
+            (task) => `
+              <article class="${task.focus === "calm" ? "low-focus" : ""}">
+                <span>${TaskTimeLabel(task)}</span>
+                <b>${escapeHTML(task.title)}</b>
+                <small>${focusMeta[task.focus].label}${task.focus === "calm" ? " · хороший кандидат на перенос" : ""}</small>
+                <button type="button" data-overload-move="${task.id}" data-move-from="${task.occurrenceDate || task.date}" data-move-to="${targetDate}">Перенести</button>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="panel-actions">
+        <button type="button" data-action="dismiss-overload">Оставить как есть</button>
+      </div>
+    </section>
+  `;
+}
+
+function MoveConfirmPanel() {
+  if (!appState.pendingMove) return "";
+  const task = appState.tasks.find((item) => item.id === appState.pendingMove.taskId);
+  if (!task) return "";
+
+  return `
+    <section class="gentle-panel move-panel" role="dialog" aria-label="Подтверждение переноса">
+      <div>
+        <span>Перенос повторяющейся задачи</span>
+        <h2>${escapeHTML(task.title)}</h2>
+        <p>Я изменю только выбранное повторение: ${formatDateShort(parseISO(appState.pendingMove.fromDate))} → ${formatDateShort(parseISO(appState.pendingMove.targetDate))}. Серия останется прежней.</p>
+      </div>
+      <div class="panel-actions">
+        <button type="button" data-action="confirm-move">Подтвердить перенос</button>
+        <button type="button" data-action="cancel-move">Оставить на месте</button>
+      </div>
+    </section>
+  `;
+}
+
 function WeekScreen() {
   const days = getWeekDays(appState.selectedDate);
   const range = `${days[0].getDate()}–${formatDateShort(days[6])}`;
@@ -739,16 +823,16 @@ function WeekScreen() {
               const iso = toISO(day);
               const tasks = getTasksForDate(iso).sort(compareTaskTime);
               return `
-                <button class="week-cell ${iso === todayISO() ? "today" : ""}" type="button" data-date="${iso}">
+                <div class="week-cell ${iso === todayISO() ? "today" : ""}" role="button" tabindex="0" data-date="${iso}" data-drop-date="${iso}">
                   <header><span>${capitalize(formatWeekday(day, "short"))}</span><b>${day.getDate()}</b></header>
                   <div>
                     ${tasks
                       .slice(0, 3)
-                      .map((task) => `<p><i class="${taskClass(task)}"></i><span>${escapeHTML(task.title)}${normalizeCategory(task.category) === "work" && task.client ? ` · ${escapeHTML(task.client)}` : ""}</span></p>`)
+                      .map((task) => `<p class="calendar-task" draggable="true" data-drag-task="${task.id}" data-drag-date="${iso}"><i class="${taskClass(task)}"></i><span>${escapeHTML(task.title)}${normalizeCategory(task.category) === "work" && task.client ? ` · ${escapeHTML(task.client)}` : ""}</span></p>`)
                       .join("")}
                     ${tasks.length > 3 ? `<small>+${tasks.length - 3}</small>` : ""}
                   </div>
-                </button>
+                </div>
               `;
             })
             .join("")}
@@ -811,7 +895,7 @@ function MonthScreen() {
             const tasks = getTasksForDate(day.iso).sort(compareTaskTime);
             const statsForDay = getStats(tasks);
             return `
-              <button class="month-day ${day.inMonth ? "" : "muted"} ${day.iso === todayISO() ? "today" : ""} ${day.iso === appState.selectedDate ? "selected" : ""}" type="button" data-date="${day.iso}">
+              <div class="month-day ${day.inMonth ? "" : "muted"} ${day.iso === todayISO() ? "today" : ""} ${day.iso === appState.selectedDate ? "selected" : ""}" role="button" tabindex="0" data-date="${day.iso}" data-drop-date="${day.iso}">
                 <header>
                   <b>${parseISO(day.iso).getDate()}</b>
                   <span>${tasks.length || ""}</span>
@@ -825,11 +909,11 @@ function MonthScreen() {
                 <div class="month-task-list">
                   ${tasks
                     .slice(0, 2)
-                    .map((task) => `<p><i class="${taskClass(task)}"></i><span>${escapeHTML(task.title)}${task.client ? ` · ${escapeHTML(task.client)}` : ""}</span></p>`)
+                    .map((task) => `<p class="calendar-task" draggable="true" data-drag-task="${task.id}" data-drag-date="${day.iso}"><i class="${taskClass(task)}"></i><span>${escapeHTML(task.title)}${task.client ? ` · ${escapeHTML(task.client)}` : ""}</span></p>`)
                     .join("")}
                   ${tasks.length > 2 ? `<small>+${tasks.length - 2}</small>` : ""}
                 </div>
-              </button>
+              </div>
             `;
           })
           .join("")}
@@ -928,6 +1012,8 @@ function TaskModal() {
           <span>Напомнить мне об этой задаче</span>
         </label>
 
+        <p class="reminder-note">Напоминания надёжнее всего работают, пока АССИЯ открыта в браузере или PWA. Если приложение закрыто или система выгрузила его из памяти, уведомление может не сработать вовремя.</p>
+
         <label class="field reminder-field ${value.reminderAt ? "" : "is-hidden"}">
           <span>Время напоминания</span>
           <input name="reminderAt" type="datetime-local" value="${escapeAttr(value.reminderAt || defaultReminderValue(value))}" />
@@ -997,7 +1083,8 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-date]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      if (event.target.closest("[data-drag-task]")) return;
       appState.selectedDate = button.dataset.date;
       appState.clientFilter = "all";
       if (
@@ -1009,6 +1096,41 @@ function bindEvents() {
         appState.view = "day";
       }
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-drag-task]").forEach((item) => {
+    item.addEventListener("click", (event) => event.stopPropagation());
+    item.addEventListener("dragstart", (event) => {
+      event.stopPropagation();
+      event.dataTransfer.setData("text/plain", JSON.stringify({
+        taskId: item.dataset.dragTask,
+        fromDate: item.dataset.dragDate,
+      }));
+      event.dataTransfer.effectAllowed = "move";
+      item.classList.add("is-dragging");
+    });
+    item.addEventListener("dragend", () => {
+      item.classList.remove("is-dragging");
+      document.querySelectorAll(".drag-over").forEach((element) => element.classList.remove("drag-over"));
+    });
+  });
+
+  document.querySelectorAll("[data-drop-date]").forEach((cell) => {
+    cell.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      cell.classList.add("drag-over");
+    });
+    cell.addEventListener("dragleave", () => {
+      cell.classList.remove("drag-over");
+    });
+    cell.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cell.classList.remove("drag-over");
+      const payload = parseDragPayload(event.dataTransfer.getData("text/plain"));
+      if (!payload) return;
+      requestTaskMove(payload.taskId, payload.fromDate, cell.dataset.dropDate);
     });
   });
 
@@ -1168,6 +1290,46 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-snooze-reminder]").forEach((button) => {
+    button.addEventListener("click", () => {
+      snoozeReminder(button.dataset.reminderTask, button.dataset.snoozeReminder);
+    });
+  });
+
+  document.querySelectorAll("[data-action='dismiss-reminder']").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.reminderPromptId = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='dismiss-overload']").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.overloadDate = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-overload-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      requestTaskMove(button.dataset.overloadMove, button.dataset.moveFrom, button.dataset.moveTo);
+    });
+  });
+
+  document.querySelectorAll("[data-action='confirm-move']").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!appState.pendingMove) return;
+      moveTaskToDate(appState.pendingMove.taskId, appState.pendingMove.fromDate, appState.pendingMove.targetDate, { confirmed: true });
+    });
+  });
+
+  document.querySelectorAll("[data-action='cancel-move']").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.pendingMove = null;
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-action='open-overdue']").forEach((button) => {
     button.addEventListener("click", () => {
       const overdue = getOverdueTasks()[0];
@@ -1241,6 +1403,11 @@ function handleTaskSubmit(event) {
     return;
   }
 
+  if (data.get("reminderEnabled") && !reminderAt) {
+    showToast("Чтобы я напомнила вовремя, выбери дату и время напоминания.");
+    return;
+  }
+
   const task = normalizeTask({
     id: isRecurringEdit ? crypto.randomUUID() : appState.editingId || crypto.randomUUID(),
     title,
@@ -1281,6 +1448,9 @@ function handleTaskSubmit(event) {
 
   const dayTasks = getTasksForDate(date);
   requestNotificationPermission(task.reminderAt);
+  if (dayTasks.length > 5 && task.care) {
+    appState.overloadDate = date;
+  }
   showToast(dayTasks.length > 5 && task.care ? "Ты много запланировала. Давай посмотрим, что можно перенести, чтобы ты не выгорела." : "Задача сохранена. Я присмотрю за деталями.");
   checkReminders();
 }
@@ -1333,15 +1503,17 @@ function checkReminders() {
 
   appState.tasks = appState.tasks.map((task) => {
     if (!task.reminderAt || task.reminderDone) return task;
-    if (new Date(task.reminderAt).getTime() > now) return task;
+    const reminderTime = getReminderDueTime(task);
+    if (!reminderTime || new Date(reminderTime).getTime() > now) return task;
 
     dueTasks.push(task);
     changed = true;
-    return { ...task, reminderDone: true };
+    return { ...task, reminderDone: true, snoozedUntil: "" };
   });
 
   if (!dueTasks.length) return;
   if (changed) saveTasks();
+  appState.reminderPromptId = dueTasks[0].id;
 
   if ("Notification" in window && Notification.permission === "granted") {
     dueTasks.forEach((task) => {
@@ -1349,11 +1521,126 @@ function checkReminders() {
         body: `${task.title}${task.client ? ` · ${task.client}` : ""}`,
       });
     });
-    return;
   }
 
   const firstTask = dueTasks[0];
   showToast(`Напоминание: ${firstTask.title}`);
+}
+
+function getReminderDueTime(task) {
+  return task.snoozedUntil || task.reminderAt || "";
+}
+
+function snoozeReminder(taskId, option) {
+  const snoozedUntil = getSnoozeTime(option);
+  appState.tasks = appState.tasks.map((task) =>
+    task.id === taskId ? { ...task, snoozedUntil, reminderDone: false } : task,
+  );
+  saveTasks();
+  appState.reminderPromptId = null;
+  showToast(`Напоминание отложено до ${formatReminderText(snoozedUntil)}.`);
+}
+
+function getSnoozeTime(option) {
+  const date = new Date();
+  if (option === "10m") date.setMinutes(date.getMinutes() + 10);
+  if (option === "1h") date.setHours(date.getHours() + 1);
+  if (option === "tomorrow") {
+    date.setDate(date.getDate() + 1);
+    date.setHours(9, 0, 0, 0);
+  }
+  return formatDateTimeInput(date);
+}
+
+function parseDragPayload(value) {
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed?.taskId || !isISODate(parsed?.fromDate)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function requestTaskMove(taskId, fromDate, targetDate) {
+  if (!taskId || !isISODate(fromDate) || !isISODate(targetDate)) return;
+  if (fromDate === targetDate) {
+    showToast("Задача уже стоит на этом дне.");
+    return;
+  }
+
+  const task = appState.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  if (task.repeat !== "none" && occursOn(task, fromDate)) {
+    appState.pendingMove = { taskId, fromDate, targetDate };
+    render();
+    return;
+  }
+
+  moveTaskToDate(taskId, fromDate, targetDate);
+}
+
+function moveTaskToDate(taskId, fromDate, targetDate, options = {}) {
+  const task = appState.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  if (task.repeat !== "none" && occursOn(task, fromDate)) {
+    if (!options.confirmed) {
+      appState.pendingMove = { taskId, fromDate, targetDate };
+      render();
+      return;
+    }
+
+    const movedTask = normalizeTask({
+      ...task,
+      id: crypto.randomUUID(),
+      date: targetDate,
+      repeat: "none",
+      completedDates: isCompleted(task, fromDate) ? [targetDate] : [],
+      recurrenceExceptionDates: [],
+      sourceTaskId: task.id,
+      createdAt: Date.now(),
+    });
+
+    appState.tasks = [
+      ...appState.tasks.map((item) => (item.id === task.id ? addRecurrenceException(item, fromDate) : item)),
+      movedTask,
+    ];
+  } else {
+    appState.tasks = appState.tasks.map((item) => {
+      if (item.id !== taskId) return item;
+      const completedDates = (item.completedDates || []).map((date) => (date === fromDate ? targetDate : date));
+      return { ...item, date: targetDate, completedDates: [...new Set(completedDates)] };
+    });
+  }
+
+  saveTasks();
+  appState.pendingMove = null;
+  appState.overloadDate = null;
+  appState.selectedDate = targetDate;
+  showToast("Задача перенесена. Я сохранила новый фокус дня.");
+}
+
+function findNearestLightDay(dateISO) {
+  const currentCount = getTasksForDate(dateISO).length;
+
+  for (let offset = 1; offset <= 14; offset += 1) {
+    const forward = shiftISO(dateISO, offset);
+    if (getTasksForDate(forward).length < Math.min(currentCount, 5)) return forward;
+  }
+
+  return shiftISO(dateISO, 1);
+}
+
+function focusWeight(focus) {
+  const weights = {
+    calm: 4,
+    urgent: 3,
+    important: 2,
+    urgentImportant: 1,
+  };
+  return weights[focus] || 0;
 }
 
 function getTasksForDate(dateISO) {
