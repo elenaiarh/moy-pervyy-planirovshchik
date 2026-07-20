@@ -368,6 +368,10 @@ svg {
   display: inline-block;
 }
 
+.week-cell p i {
+  flex: 0 0 9px;
+}
+
 .legend b {
   margin-left: auto;
   color: var(--text);
@@ -611,6 +615,18 @@ svg {
 
 .client-chips b {
   font-family: var(--mono);
+}
+
+.client-empty {
+  padding: 12px 13px;
+  border: 1px dashed rgba(196, 168, 108, 0.34);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 246, 235, 0.24);
+  font-family: var(--serif);
+  font-size: 18px;
+  font-style: italic;
+  line-height: 1.32;
 }
 
 .focus-summary-grid {
@@ -877,6 +893,10 @@ svg {
   border-bottom: 1px solid var(--air);
 }
 
+.task-row.has-move {
+  grid-template-columns: 76px minmax(0, 1fr) 32px 18px auto 36px;
+}
+
 .task-row time {
   font-family: var(--mono);
   font-size: 14px;
@@ -983,6 +1003,21 @@ svg {
   place-items: center;
   background: rgba(255, 246, 235, 0.55);
   color: var(--accent);
+}
+
+.row-move,
+.move-task-button {
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(255, 246, 235, 0.38);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.move-task-button {
+  color: var(--text);
 }
 
 .row-done svg {
@@ -1567,7 +1602,7 @@ svg {
   background: rgba(255, 246, 235, 0.97);
   box-shadow: var(--shadow);
   transform: translateX(-50%);
-  animation: modalIn 220ms ease both;
+  animation: gentlePanelIn 220ms ease both;
 }
 
 .gentle-panel > div:first-child > span {
@@ -1620,6 +1655,11 @@ svg {
   display: grid;
   gap: 9px;
   margin-top: 14px;
+}
+
+.overload-date-field {
+  max-width: 220px;
+  margin: 14px 0 0;
 }
 
 .overload-list article {
@@ -1867,6 +1907,7 @@ svg {
 :root[data-theme="dark"] .overload-list article,
 :root[data-theme="dark"] .air-block,
 :root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .client-empty,
 :root[data-theme="dark"] .reminder-note {
   background-color: rgba(245, 230, 211, 0.07);
 }
@@ -1968,6 +2009,17 @@ svg {
   }
   to {
     transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes gentlePanelIn {
+  from {
+    transform: translate(-50%, 24px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
     opacity: 1;
   }
 }
@@ -2077,6 +2129,15 @@ svg {
   .task-row {
     grid-template-columns: 65px minmax(0, 1fr) 28px 15px 31px;
     gap: 7px;
+  }
+
+  .task-row.has-move {
+    grid-template-columns: 65px minmax(0, 1fr) 28px 15px auto 31px;
+  }
+
+  .row-move {
+    padding: 6px 7px;
+    font-size: 11px;
   }
 
   .task-card {

@@ -429,7 +429,7 @@ function Dashboard() {
 
       ${overdue.length ? OverdueStrip(overdue.length) : ""}
 
-      ${ClientSummary(clientStats, "dashboard")}
+      ${ClientSummary(clientStats, "dashboard", todayTasks)}
 
       ${FocusMatrixSummary(todayTasks)}
 
@@ -587,7 +587,7 @@ function DayScreen() {
 
       <div class="big-time">${formatCurrentTime()}</div>
 
-      ${ClientSummary(clientStats, "day")}
+      ${ClientSummary(clientStats, "day", dayTasks)}
 
       ${FocusMatrixSummary(dayTasks)}
 
@@ -631,16 +631,17 @@ function ActiveTaskCard(task) {
       <div class="task-actions">
         <span class="category-icon ${taskClass(task)}" title="${categoryLabel(task)}">${CategoryIcon(task)}</span>
         <span class="focus-tag" style="--focus:${focusMeta[task.focus].color}">${focusMeta[task.focus].short}</span>
+        <button class="move-task-button" type="button" data-move-edit="${task.id}" data-move-date="${task.occurrenceDate || appState.selectedDate}">Перенести</button>
         <button class="complete-button" type="button" data-complete="${task.id}">Выполнено</button>
       </div>
     </article>
   `;
 }
 
-function TaskRow(task, dateISO, allowOpen = false) {
+function TaskRow(task, dateISO, allowOpen = false, showMove = false) {
   const completed = isCompleted(task, dateISO);
   return `
-    <article class="task-row ${completed ? "done" : ""}" ${allowOpen ? `data-open-task="${task.id}" data-open-date="${dateISO}"` : ""}>
+    <article class="task-row ${completed ? "done" : ""} ${showMove ? "has-move" : ""}" ${allowOpen ? `data-open-task="${task.id}" data-open-date="${dateISO}"` : ""}>
       <time>${task.allDay ? "Весь день" : task.start}</time>
       <div class="task-main">
         <span>${escapeHTML(task.title)}</span>
@@ -649,6 +650,7 @@ function TaskRow(task, dateISO, allowOpen = false) {
       </div>
       <i class="mini-icon ${taskClass(task)}" title="${categoryLabel(task)}">${CategoryIcon(task)}</i>
       <em class="focus-dot" style="--focus:${focusMeta[task.focus].color}" title="${focusMeta[task.focus].label}"></em>
+      ${showMove ? `<button class="row-move" type="button" data-move-edit="${task.id}" data-move-date="${dateISO}">Перенести</button>` : ""}
       <button class="row-done" type="button" data-complete="${task.id}" aria-label="Отметить выполненной">${completed ? Icon("check") : ""}</button>
     </article>
   `;
@@ -682,9 +684,21 @@ function TaskTimeLabel(task) {
   return task.end ? `${task.start} – ${task.end}` : `С ${task.start}`;
 }
 
-function ClientSummary(clientStats, source) {
-  if (!clientStats.length) return "";
+function ClientSummary(clientStats, source, tasks = []) {
+  const workTotal = tasks.filter((task) => normalizeCategory(task.category) === "work").length;
   const total = clientStats.reduce((sum, item) => sum + item.count, 0);
+
+  if (!clientStats.length) {
+    return `
+      <section class="client-summary" aria-label="Задачи по клиентам">
+        <div class="section-head compact-head">
+          <h2>Клиенты дня</h2>
+          <span>${workTotal} ${declOfNum(workTotal, ["рабочая задача", "рабочие задачи", "рабочих задач"])}</span>
+        </div>
+        <div class="client-empty">Рабочие задачи с клиентами появятся здесь. Клиент поможет увидеть нагрузку мягче и точнее.</div>
+      </section>
+    `;
+  }
 
   return `
     <section class="client-summary" aria-label="Задачи по клиентам">
@@ -926,8 +940,12 @@ function OverloadPanel() {
       <div>
         <span>День стал насыщенным</span>
         <h2>${formatDateShort(parseISO(appState.overloadDate))}: ${tasks.length} ${declOfNum(tasks.length, ["задача", "задачи", "задач"])}</h2>
-        <p>Можно перенести одну из задач на ${formatDateShort(parseISO(targetDate))}. Я особенно подсветила спокойные задачи.</p>
+        <p>Можно перенести одну из задач на более спокойный день. Я предложила дату, но ты можешь выбрать другую.</p>
       </div>
+      <label class="field compact-field overload-date-field">
+        <span>Дата переноса</span>
+        <input name="overloadMoveDate" type="date" value="${targetDate}" />
+      </label>
       <div class="overload-list">
         ${tasks
           .map(
@@ -1501,7 +1519,23 @@ function bindEvents() {
 
   document.querySelectorAll("[data-overload-move]").forEach((button) => {
     button.addEventListener("click", () => {
-      requestTaskMove(button.dataset.overloadMove, button.dataset.moveFrom, button.dataset.moveTo);
+      const selectedMoveDate = document.querySelector("[name='overloadMoveDate']")?.value || button.dataset.moveTo;
+      if (!isISODate(selectedMoveDate)) {
+        showToast("Выбери дату переноса, и я аккуратно передвину задачу.");
+        return;
+      }
+      requestTaskMove(button.dataset.overloadMove, button.dataset.moveFrom, selectedMoveDate);
+    });
+  });
+
+  document.querySelectorAll("[data-move-edit]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      appState.editingId = button.dataset.moveEdit;
+      appState.editingDate = button.dataset.moveDate || appState.selectedDate;
+      appState.modalOpen = true;
+      render();
+      window.setTimeout(() => document.querySelector("#task-form [name='date']")?.focus(), 0);
     });
   });
 
@@ -1636,11 +1670,19 @@ function handleTaskSubmit(event) {
   appState.editingDate = null;
 
   const dayTasks = getTasksForDate(date);
+  const missingWorkClient = category === "work" && !task.client;
+  const dayIsOverloaded = dayTasks.length > 5 && task.care;
   requestNotificationPermission(task.reminderAt);
-  if (dayTasks.length > 5 && task.care) {
+  if (dayIsOverloaded) {
     appState.overloadDate = date;
   }
-  showToast(dayTasks.length > 5 && task.care ? "Ты много запланировала. Давай посмотрим, что можно перенести, чтобы ты не выгорела." : "Задача сохранена. Я присмотрю за деталями.");
+  showToast(
+    dayIsOverloaded
+      ? "Ты много запланировала. Давай посмотрим, что можно перенести, чтобы ты не выгорела."
+      : missingWorkClient
+        ? "Задача сохранена. Клиент поможет увидеть нагрузку, но я бережно сохраню задачу и без него."
+        : "Задача сохранена. Я присмотрю за деталями.",
+  );
   checkReminders();
 }
 
@@ -2088,7 +2130,7 @@ function getAirBlocks(tasks) {
 function mergeTasksAndAir(tasks, airBlocks) {
   return tasks.map((task) => {
     const block = airBlocks.find((item) => item.afterTaskId === task.id);
-    return `${TaskRow(task, appState.selectedDate, true)}${block ? AirBlock(block) : ""}`;
+    return `${TaskRow(task, appState.selectedDate, true, true)}${block ? AirBlock(block) : ""}`;
   });
 }
 
