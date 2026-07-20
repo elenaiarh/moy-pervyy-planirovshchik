@@ -409,24 +409,30 @@ svg {
   border: 2px solid currentColor;
   border-radius: 50%;
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 0 22px;
+  display: inline-block;
 }
 
 .clock-icon::before,
 .clock-icon::after {
   content: "";
   position: absolute;
-  left: 9px;
-  top: 4px;
+  left: 50%;
+  top: 50%;
   width: 2px;
-  height: 7px;
+  border-radius: 999px;
   background: currentColor;
-  transform-origin: bottom;
+  transform-origin: center bottom;
+}
+
+.clock-icon::before {
+  height: 7px;
+  transform: translate(-50%, -100%);
 }
 
 .clock-icon::after {
-  top: 10px;
-  transform: rotate(90deg);
+  height: 6px;
+  transform: translate(-50%, -100%) rotate(90deg);
 }
 
 .overdue-strip span:nth-child(2) {
