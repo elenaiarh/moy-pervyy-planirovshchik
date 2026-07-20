@@ -586,6 +586,110 @@ svg {
   font-size: 24px;
 }
 
+.filter-panel,
+.analytics-panel {
+  margin-top: 20px;
+  padding: 17px;
+  border: 1px solid rgba(196, 168, 108, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 246, 235, 0.34);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.compact-field {
+  margin-bottom: 0;
+}
+
+.compact-field input,
+.compact-field select {
+  min-height: 43px;
+  padding: 9px 10px;
+  font-size: 14px;
+}
+
+.filter-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analytics-card {
+  min-height: 98px;
+  padding: 14px;
+  border: 1px solid rgba(43, 58, 74, 0.12);
+  border-radius: 8px;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  background: rgba(245, 230, 211, 0.44);
+}
+
+.analytics-card span,
+.analytics-card small,
+.muted-line {
+  color: var(--muted);
+}
+
+.analytics-card b {
+  font-family: var(--mono);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.analytics-card small {
+  line-height: 1.25;
+}
+
+.analytics-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.analytics-columns > div {
+  padding: 13px;
+  border: 1px dashed rgba(196, 168, 108, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 246, 235, 0.25);
+}
+
+.analytics-columns h3 {
+  margin: 0 0 10px;
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 600;
+}
+
+.analytics-columns p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 7px;
+  color: var(--muted);
+}
+
+.analytics-columns p:last-child {
+  margin-bottom: 0;
+}
+
+.analytics-columns b {
+  color: var(--text);
+  font-family: var(--mono);
+}
+
 .task-preview-list,
 .day-list {
   display: grid;
@@ -1541,6 +1645,15 @@ svg {
     flex-direction: column;
   }
 
+  .filter-grid,
+  .analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-columns {
+    grid-template-columns: 1fr;
+  }
+
   .month-grid {
     grid-template-columns: repeat(7, minmax(104px, 1fr));
     overflow-x: auto;
@@ -1580,6 +1693,11 @@ svg {
 
   .focus-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filter-grid,
+  .analytics-grid {
+    grid-template-columns: 1fr;
   }
 
   .task-row {

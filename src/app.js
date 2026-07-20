@@ -132,6 +132,12 @@ const appState = {
   activeTab: "day",
   focusFilter: "all",
   clientFilter: "all",
+  categoryFilter: "all",
+  statusFilter: "all",
+  overdueFilter: "all",
+  repeatFilter: "all",
+  reminderFilter: "all",
+  clientSearch: "",
   splashDone: sessionStorage.getItem("assiya.splash.done") === "true",
 };
 
@@ -240,6 +246,7 @@ function Splash() {
 function Dashboard() {
   const date = parseISO(appState.selectedDate);
   const todayTasks = getTasksForDate(appState.selectedDate);
+  const filteredTodayTasks = applyTaskFilters(todayTasks, appState.selectedDate);
   const stats = getStats(todayTasks);
   const clientStats = getClientStats(todayTasks);
   const overdue = getOverdueTasks();
@@ -288,6 +295,8 @@ function Dashboard() {
 
       ${FocusMatrixSummary(todayTasks)}
 
+      ${AnalyticsPanel("day", todayTasks)}
+
       <nav class="view-tabs" aria-label="Переключение вида">
         <button class="${appState.activeTab === "day" ? "active" : ""}" data-tab="day" type="button">День</button>
         <button class="${appState.activeTab === "week" ? "active" : ""}" data-tab="week" type="button">Неделя</button>
@@ -303,7 +312,7 @@ function Dashboard() {
             Открыть
           </button>
         </div>
-        ${appState.activeTab === "month" ? MonthPreview() : appState.activeTab === "week" ? WeekPreview() : TaskPreview(todayTasks)}
+        ${appState.activeTab === "month" ? MonthPreview() : appState.activeTab === "week" ? WeekPreview() : TaskPreview(filteredTodayTasks)}
       </section>
     </section>
   `;
@@ -406,10 +415,7 @@ function MonthPreview() {
 function DayScreen() {
   const dayTasks = getTasksForDate(appState.selectedDate);
   const clientStats = getClientStats(dayTasks);
-  const tasks = dayTasks
-    .filter((task) => appState.focusFilter === "all" || task.focus === appState.focusFilter)
-    .filter((task) => appState.clientFilter === "all" || task.client === appState.clientFilter)
-    .sort(compareTaskTime);
+  const tasks = applyTaskFilters(dayTasks, appState.selectedDate).sort(compareTaskTime);
   const active = getActiveTasks(tasks, appState.selectedDate);
   const airBlocks = getAirBlocks(tasks);
   const remaining = tasks.filter((task) => !isCompleted(task, appState.selectedDate)).length;
@@ -435,6 +441,10 @@ function DayScreen() {
 
       ${FocusMatrixSummary(dayTasks)}
 
+      ${FilterPanel(dayTasks, tasks)}
+
+      ${AnalyticsPanel("day", dayTasks)}
+
       <section class="active-now">
         <h2>Активные задачи</h2>
         ${
@@ -449,7 +459,7 @@ function DayScreen() {
         ${
           tasks.length
             ? mergeTasksAndAir(tasks, airBlocks).join("")
-            : `<div class="empty-state">У тебя есть свободное время. Наслаждайся паузой или добавь что-то важное.</div>`
+            : `<div class="empty-state">По этим фильтрам задач нет. Можно мягко расширить поиск.</div>`
         }
       </section>
 
@@ -568,6 +578,132 @@ function FocusMatrixSummary(tasks) {
   `;
 }
 
+function FilterPanel(allTasks, filteredTasks) {
+  const clientOptions = getClientStats(allTasks);
+  const activeCount = getActiveFilterCount();
+
+  return `
+    <section class="filter-panel" aria-label="Фильтры и поиск">
+      <div class="section-head compact-head">
+        <h2>Поиск и фильтры</h2>
+        <span>${filteredTasks.length} из ${allTasks.length}</span>
+      </div>
+      <div class="filter-grid">
+        <label class="field compact-field">
+          <span>Дата</span>
+          <input name="dateFilter" type="date" value="${appState.selectedDate}" />
+        </label>
+        <label class="field compact-field">
+          <span>Поиск по клиенту</span>
+          <input name="clientSearch" placeholder="Например, Анна" value="${escapeAttr(appState.clientSearch)}" />
+        </label>
+        <label class="field compact-field">
+          <span>Клиент</span>
+          <select name="clientFilter">
+            <option value="all" ${appState.clientFilter === "all" ? "selected" : ""}>Все клиенты</option>
+            ${clientOptions.map((item) => `<option value="${escapeAttr(item.client)}" ${appState.clientFilter === item.client ? "selected" : ""}>${escapeHTML(item.client)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field compact-field">
+          <span>Категория</span>
+          <select name="categoryFilter">
+            <option value="all" ${appState.categoryFilter === "all" ? "selected" : ""}>Все категории</option>
+            ${Object.entries(categoryMeta).map(([key, meta]) => `<option value="${key}" ${appState.categoryFilter === key ? "selected" : ""}>${meta.label}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field compact-field">
+          <span>Статус</span>
+          <select name="statusFilter">
+            <option value="all" ${appState.statusFilter === "all" ? "selected" : ""}>Все статусы</option>
+            <option value="completed" ${appState.statusFilter === "completed" ? "selected" : ""}>Выполненные</option>
+            <option value="pending" ${appState.statusFilter === "pending" ? "selected" : ""}>Не выполненные</option>
+          </select>
+        </label>
+        <label class="field compact-field">
+          <span>Просрочка</span>
+          <select name="overdueFilter">
+            <option value="all" ${appState.overdueFilter === "all" ? "selected" : ""}>Все задачи</option>
+            <option value="overdue" ${appState.overdueFilter === "overdue" ? "selected" : ""}>Просроченные</option>
+            <option value="notOverdue" ${appState.overdueFilter === "notOverdue" ? "selected" : ""}>Без просрочки</option>
+          </select>
+        </label>
+        <label class="field compact-field">
+          <span>Повтор</span>
+          <select name="repeatFilter">
+            <option value="all" ${appState.repeatFilter === "all" ? "selected" : ""}>Любой повтор</option>
+            <option value="none" ${appState.repeatFilter === "none" ? "selected" : ""}>Нет</option>
+            <option value="weekly" ${appState.repeatFilter === "weekly" ? "selected" : ""}>Каждую неделю</option>
+            <option value="monthly" ${appState.repeatFilter === "monthly" ? "selected" : ""}>Каждый месяц</option>
+          </select>
+        </label>
+        <label class="field compact-field">
+          <span>Напоминания</span>
+          <select name="reminderFilter">
+            <option value="all" ${appState.reminderFilter === "all" ? "selected" : ""}>Все задачи</option>
+            <option value="with" ${appState.reminderFilter === "with" ? "selected" : ""}>С напоминанием</option>
+            <option value="without" ${appState.reminderFilter === "without" ? "selected" : ""}>Без напоминания</option>
+          </select>
+        </label>
+      </div>
+      <div class="filter-actions">
+        <button class="text-button slim" type="button" data-action="reset-filters">Сбросить фильтры${activeCount ? ` · ${activeCount}` : ""}</button>
+      </div>
+    </section>
+  `;
+}
+
+function AnalyticsPanel(period, tasks) {
+  const analytics = getAnalytics(period, appState.selectedDate, tasks);
+
+  return `
+    <section class="analytics-panel" aria-label="Аналитика">
+      <div class="section-head compact-head">
+        <h2>Аналитика</h2>
+        <span>${analytics.periodLabel}</span>
+      </div>
+      <div class="analytics-grid">
+        <div class="analytics-card">
+          <span>Всего</span>
+          <b>${analytics.stats.total}</b>
+          <small>${analytics.completionPercent}% выполнено</small>
+        </div>
+        <div class="analytics-card">
+          <span>Выполнено</span>
+          <b>${analytics.stats.completed}</b>
+          <small>${analytics.pending} ждёт внимания</small>
+        </div>
+        <div class="analytics-card">
+          <span>Просрочка</span>
+          <b>${analytics.overdue}</b>
+          <small>без резкой тревоги</small>
+        </div>
+        <div class="analytics-card">
+          <span>Баланс</span>
+          <small>Рабочие ${analytics.stats.work} · Я ${analytics.stats.self} · Мы ${analytics.stats.together}</small>
+        </div>
+      </div>
+      <div class="analytics-columns">
+        <div>
+          <h3>Клиенты</h3>
+          ${
+            analytics.clientStats.length
+              ? analytics.clientStats.slice(0, 4).map((item) => `<p><span>${escapeHTML(item.client)}</span><b>${item.count}</b></p>`).join("")
+              : `<p class="muted-line">Рабочие задачи с клиентами появятся здесь.</p>`
+          }
+        </div>
+        <div>
+          <h3>Загруженные дни</h3>
+          ${
+            analytics.busiestDays.length
+              ? analytics.busiestDays.slice(0, 4).map((item) => `<p><span>${formatDateShort(parseISO(item.date))}</span><b>${item.count}</b></p>`).join("")
+              : `<p class="muted-line">Пока всё спокойно.</p>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function AirBlock(block) {
   return `
     <div class="air-block">
@@ -580,6 +716,7 @@ function AirBlock(block) {
 function WeekScreen() {
   const days = getWeekDays(appState.selectedDate);
   const range = `${days[0].getDate()}–${formatDateShort(days[6])}`;
+  const weekTasks = getTasksForDates(days.map(toISO));
 
   return `
     <section class="week-screen page">
@@ -629,6 +766,8 @@ function WeekScreen() {
           </div>
         </aside>
       </section>
+
+      ${AnalyticsPanel("week", weekTasks)}
     </section>
   `;
 }
@@ -695,6 +834,8 @@ function MonthScreen() {
           })
           .join("")}
       </section>
+
+      ${AnalyticsPanel("month", monthTasks)}
     </section>
   `;
 }
@@ -977,11 +1118,52 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[name='dateFilter']").forEach((input) => {
+    const handleDateFilter = () => {
+      if (!isISODate(input.value)) return;
+      appState.selectedDate = input.value;
+      render();
+    };
+
+    input.addEventListener("input", handleDateFilter);
+    input.addEventListener("change", handleDateFilter);
+  });
+
+  document.querySelectorAll("[name='clientSearch']").forEach((input) => {
+    input.addEventListener("input", () => {
+      appState.clientSearch = input.value;
+      render();
+    });
+  });
+
+  [
+    ["clientFilter", "clientFilter"],
+    ["categoryFilter", "categoryFilter"],
+    ["statusFilter", "statusFilter"],
+    ["overdueFilter", "overdueFilter"],
+    ["repeatFilter", "repeatFilter"],
+    ["reminderFilter", "reminderFilter"],
+  ].forEach(([name, stateKey]) => {
+    document.querySelectorAll(`[name='${name}']`).forEach((select) => {
+      select.addEventListener("change", () => {
+        appState[stateKey] = select.value;
+        render();
+      });
+    });
+  });
+
   document.querySelectorAll("[data-action='toggle-filter']").forEach((button) => {
     button.addEventListener("click", () => {
       const order = ["all", "urgentImportant", "important", "urgent", "calm"];
       const index = order.indexOf(appState.focusFilter);
       appState.focusFilter = order[(index + 1) % order.length];
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='reset-filters']").forEach((button) => {
+    button.addEventListener("click", () => {
+      resetFilters();
       render();
     });
   });
@@ -1180,6 +1362,59 @@ function getTasksForDate(dateISO) {
     .map((task) => ({ ...task, occurrenceDate: dateISO }));
 }
 
+function getTasksForDates(dateList) {
+  return dateList.flatMap((dateISO) => getTasksForDate(dateISO));
+}
+
+function applyTaskFilters(tasks, dateISO) {
+  const clientSearch = appState.clientSearch.trim().toLocaleLowerCase("ru-RU");
+
+  return tasks.filter((task) => {
+    const category = normalizeCategory(task.category);
+    const completed = isCompleted(task, dateISO);
+    const overdue = isTaskOverdue(task, dateISO);
+    const hasReminder = Boolean(task.reminderAt);
+
+    if (appState.focusFilter !== "all" && task.focus !== appState.focusFilter) return false;
+    if (appState.clientFilter !== "all" && task.client !== appState.clientFilter) return false;
+    if (clientSearch && !task.client.toLocaleLowerCase("ru-RU").includes(clientSearch)) return false;
+    if (appState.categoryFilter !== "all" && category !== appState.categoryFilter) return false;
+    if (appState.statusFilter === "completed" && !completed) return false;
+    if (appState.statusFilter === "pending" && completed) return false;
+    if (appState.overdueFilter === "overdue" && !overdue) return false;
+    if (appState.overdueFilter === "notOverdue" && overdue) return false;
+    if (appState.repeatFilter !== "all" && task.repeat !== appState.repeatFilter) return false;
+    if (appState.reminderFilter === "with" && !hasReminder) return false;
+    if (appState.reminderFilter === "without" && hasReminder) return false;
+
+    return true;
+  });
+}
+
+function getActiveFilterCount() {
+  return [
+    appState.focusFilter !== "all",
+    appState.clientFilter !== "all",
+    appState.categoryFilter !== "all",
+    appState.statusFilter !== "all",
+    appState.overdueFilter !== "all",
+    appState.repeatFilter !== "all",
+    appState.reminderFilter !== "all",
+    Boolean(appState.clientSearch.trim()),
+  ].filter(Boolean).length;
+}
+
+function resetFilters() {
+  appState.focusFilter = "all";
+  appState.clientFilter = "all";
+  appState.categoryFilter = "all";
+  appState.statusFilter = "all";
+  appState.overdueFilter = "all";
+  appState.repeatFilter = "all";
+  appState.reminderFilter = "all";
+  appState.clientSearch = "";
+}
+
 function occursOn(task, dateISO) {
   if (task.recurrenceExceptionDates?.includes(dateISO)) return false;
   if (task.date === dateISO) return true;
@@ -1217,6 +1452,58 @@ function getStats(tasks) {
   return { total, work, self, together, personal, completed };
 }
 
+function getAnalytics(period, selectedDate, periodTasks) {
+  const tasks = periodTasks || getTasksForDates(getPeriodDates(period, selectedDate));
+  const stats = getStats(tasks);
+  const overdue = tasks.filter((task) => isTaskOverdue(task, task.occurrenceDate || task.date)).length;
+  const pending = Math.max(stats.total - stats.completed, 0);
+  const completionPercent = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
+  const busiestDays = getBusiestDays(tasks);
+
+  return {
+    period,
+    periodLabel: getAnalyticsPeriodLabel(period, selectedDate),
+    stats,
+    pending,
+    overdue,
+    completionPercent,
+    clientStats: getClientStats(tasks),
+    busiestDays,
+  };
+}
+
+function getPeriodDates(period, selectedDate) {
+  if (period === "week") return getWeekDays(selectedDate).map(toISO);
+  if (period === "month") return getMonthDays(selectedDate).filter((day) => day.inMonth).map((day) => day.iso);
+  return [selectedDate];
+}
+
+function getAnalyticsPeriodLabel(period, selectedDate) {
+  if (period === "week") {
+    const days = getWeekDays(selectedDate);
+    return `Неделя ${days[0].getDate()}–${formatDateShort(days[6])}`;
+  }
+
+  if (period === "month") {
+    return capitalize(new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(parseISO(selectedDate)));
+  }
+
+  return formatDateShort(parseISO(selectedDate));
+}
+
+function getBusiestDays(tasks) {
+  const grouped = new Map();
+  tasks.forEach((task) => {
+    const date = task.occurrenceDate || task.date;
+    grouped.set(date, (grouped.get(date) || 0) + 1);
+  });
+
+  return [...grouped.entries()]
+    .map(([date, count]) => ({ date, count }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count || a.date.localeCompare(b.date));
+}
+
 function getClientStats(tasks) {
   const grouped = new Map();
   tasks
@@ -1249,6 +1536,18 @@ function getOverdueTasks() {
     if (task.allDay) return false;
     return timeToMinutes(task.end || task.start) < nowMinutes;
   });
+}
+
+function isTaskOverdue(task, dateISO) {
+  const today = todayISO();
+  if (dateISO > today) return false;
+  if (isCompleted(task, dateISO)) return false;
+  if (dateISO < today) return true;
+  if (task.allDay) return false;
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return timeToMinutes(task.end || task.start) < nowMinutes;
 }
 
 function isCompleted(task, dateISO) {
