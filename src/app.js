@@ -307,9 +307,21 @@ function validateBackupPayload(payload) {
   }
 
   return payload.tasks.map((task) => {
+    if (!task || typeof task !== "object" || !String(task.title || "").trim() || !isISODate(task.date)) {
+      throw new Error("Invalid task in backup");
+    }
+
+    if (task.start && !normalizeTime(task.start)) {
+      throw new Error("Invalid task start in backup");
+    }
+
+    if (task.end && !normalizeTime(task.end)) {
+      throw new Error("Invalid task end in backup");
+    }
+
     const normalizedTask = normalizeTask(task);
 
-    if (!normalizedTask.title.trim() || !isISODate(normalizedTask.date)) {
+    if (!normalizedTask.allDay && normalizedTask.end && timeToMinutes(normalizedTask.end) < timeToMinutes(normalizedTask.start)) {
       throw new Error("Invalid task in backup");
     }
 

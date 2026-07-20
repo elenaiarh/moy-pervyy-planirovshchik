@@ -1,4 +1,4 @@
-const CACHE_NAME = "assiya-static-v1";
+const CACHE_NAME = "assiya-static-v2";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -34,15 +34,22 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return (
-        cachedResponse ||
-        fetch(event.request).then((networkResponse) => {
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-          return networkResponse;
-        })
-      );
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cachedResponse = await cache.match(event.request);
+      const shouldPreferNetwork =
+        event.request.mode === "navigate" ||
+        ["document", "script", "style"].includes(event.request.destination);
+
+      const networkResponsePromise = fetch(event.request).then((networkResponse) => {
+        cache.put(event.request, networkResponse.clone());
+        return networkResponse;
+      });
+
+      if (shouldPreferNetwork) {
+        return networkResponsePromise.catch(() => cachedResponse || Response.error());
+      }
+
+      return cachedResponse || networkResponsePromise.catch(() => Response.error());
     }),
   );
 });
