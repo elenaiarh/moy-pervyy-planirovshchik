@@ -1,0 +1,20 @@
+{
+  "name": "АССИЯ — заботливый планировщик",
+  "short_name": "АССИЯ",
+  "description": "Локальный планировщик задач с мягким балансом рабочих, личных и совместных дел.",
+  "lang": "ru",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F5E6D3",
+  "theme_color": "#C4A86C",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

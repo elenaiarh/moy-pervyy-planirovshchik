@@ -18,6 +18,23 @@
   --sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+:root[data-theme="dark"] {
+  --bg: #26313c;
+  --paper: #334153;
+  --paper-soft: #3b4b5d;
+  --text: #f5e6d3;
+  --muted: #d9d0c4;
+  --accent: #d8bd7d;
+  --work: #d4aaa4;
+  --self: #a9ceb5;
+  --together: #b9bbe4;
+  --personal: #a9ceb5;
+  --overdue: #d4a090;
+  --air: #4a5360;
+  --line: rgba(245, 230, 211, 0.15);
+  --shadow: 0 18px 46px rgba(12, 18, 24, 0.34);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -33,6 +50,13 @@ body {
   background-size: 34px 34px;
   font-family: var(--sans);
   letter-spacing: 0;
+}
+
+:root[data-theme="dark"] body {
+  background:
+    linear-gradient(rgba(245, 230, 211, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245, 230, 211, 0.025) 1px, transparent 1px),
+    var(--bg);
 }
 
 button,
@@ -141,6 +165,14 @@ svg {
   gap: 16px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
 .sub-topbar h1 {
   margin: 0;
   font-family: var(--serif);
@@ -181,6 +213,35 @@ svg {
   font-size: clamp(20px, 4vw, 30px);
   font-weight: 600;
   text-align: right;
+}
+
+.theme-toggle {
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 999px;
+  padding: 8px 10px 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 246, 235, 0.42);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(196, 168, 108, 0.12);
+}
+
+.theme-toggle span {
+  font-size: 13px;
+}
+
+.theme-toggle i {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--text);
+  color: var(--accent);
+  font-style: normal;
+  line-height: 1;
 }
 
 .greeting {
@@ -587,12 +648,106 @@ svg {
 }
 
 .filter-panel,
-.analytics-panel {
+.analytics-panel,
+.backup-panel {
   margin-top: 20px;
   padding: 17px;
   border: 1px solid rgba(196, 168, 108, 0.28);
   border-radius: 8px;
   background: rgba(255, 246, 235, 0.34);
+}
+
+.backup-panel {
+  margin-top: 30px;
+  padding: 0;
+  background: rgba(255, 246, 235, 0.2);
+}
+
+.backup-panel summary {
+  min-height: 48px;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.backup-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.backup-panel summary::after {
+  content: "+";
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.backup-panel[open] summary::after {
+  content: "−";
+}
+
+.backup-panel summary span {
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.backup-panel summary small {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.backup-content {
+  padding: 0 15px 15px;
+}
+
+.backup-panel p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 18px;
+  font-style: italic;
+  line-height: 1.35;
+}
+
+.backup-actions {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.backup-actions .compact-field {
+  width: min(220px, 100%);
+}
+
+.backup-file-button {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 37px;
+  cursor: pointer;
+}
+
+.backup-file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .filter-grid {
@@ -1672,6 +1827,74 @@ svg {
   transform: translate(-50%, 0);
 }
 
+:root[data-theme="dark"] .logo,
+:root[data-theme="dark"] .balance-panel,
+:root[data-theme="dark"] .calendar-day,
+:root[data-theme="dark"] .client-summary,
+:root[data-theme="dark"] .focus-summary,
+:root[data-theme="dark"] .filter-panel,
+:root[data-theme="dark"] .analytics-panel,
+:root[data-theme="dark"] .backup-panel,
+:root[data-theme="dark"] .week-preview-day,
+:root[data-theme="dark"] .task-card,
+:root[data-theme="dark"] .week-cell,
+:root[data-theme="dark"] .month-overview,
+:root[data-theme="dark"] .month-day,
+:root[data-theme="dark"] .task-modal,
+:root[data-theme="dark"] .gentle-panel,
+:root[data-theme="dark"] .toast {
+  background-color: rgba(51, 65, 83, 0.72);
+}
+
+:root[data-theme="dark"] .theme-toggle,
+:root[data-theme="dark"] .text-button,
+:root[data-theme="dark"] .today-button,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .week-nav button,
+:root[data-theme="dark"] .focus-filter button,
+:root[data-theme="dark"] .row-done,
+:root[data-theme="dark"] .panel-actions button,
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .icon-switch button,
+:root[data-theme="dark"] .focus-matrix button {
+  background-color: rgba(245, 230, 211, 0.08);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .analytics-card,
+:root[data-theme="dark"] .analytics-columns > div,
+:root[data-theme="dark"] .overload-list article,
+:root[data-theme="dark"] .air-block,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .reminder-note {
+  background-color: rgba(245, 230, 211, 0.07);
+}
+
+:root[data-theme="dark"] .modal-backdrop {
+  background: rgba(9, 14, 20, 0.42);
+}
+
+:root[data-theme="dark"] .donut-bg {
+  stroke: rgba(245, 230, 211, 0.14);
+}
+
+:root[data-theme="dark"] .seal-button,
+:root[data-theme="dark"] .complete-button,
+:root[data-theme="dark"] .save-seal,
+:root[data-theme="dark"] .panel-actions button:first-child,
+:root[data-theme="dark"] .overload-list button {
+  background: #1f2833;
+}
+
+:root[data-theme="dark"] .task-row.done {
+  color: rgba(217, 208, 196, 0.58);
+}
+
+:root[data-theme="dark"] .month-day header span {
+  background: rgba(217, 208, 196, 0.14);
+}
+
 @keyframes pageIn {
   from {
     opacity: 0;
@@ -1798,6 +2021,16 @@ svg {
     padding-top: 16px;
   }
 
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-actions {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .balance-panel {
     padding: 18px;
   }
@@ -1830,6 +2063,15 @@ svg {
   .filter-grid,
   .analytics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .backup-actions {
+    display: grid;
+    align-items: stretch;
+  }
+
+  .backup-actions .compact-field {
+    width: 100%;
   }
 
   .task-row {

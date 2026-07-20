@@ -1,4 +1,6 @@
 const STORAGE_KEY = "assiya.tasks.v1";
+const THEME_KEY = "assiya.theme.v1";
+const BACKUP_VERSION = 1;
 
 const palette = {
   bg: "#F5E6D3",
@@ -141,10 +143,13 @@ const appState = {
   repeatFilter: "all",
   reminderFilter: "all",
   clientSearch: "",
+  theme: loadTheme(),
   splashDone: sessionStorage.getItem("assiya.splash.done") === "true",
 };
 
 let toastTimer = null;
+
+applyTheme(appState.theme);
 
 function loadTasks() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -206,6 +211,118 @@ function saveTasks() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.tasks));
 }
 
+function loadTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function saveTheme(theme) {
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    showToast("Тему не удалось сохранить в этом браузере, но я переключила её на сейчас.");
+  }
+}
+
+function applyTheme(theme) {
+  const normalizedTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = normalizedTheme;
+  document.querySelector("meta[name='theme-color']")?.setAttribute("content", normalizedTheme === "dark" ? "#2B3A4A" : "#F5E6D3");
+}
+
+function createBackupPayload(tasks = appState.tasks) {
+  return {
+    app: "АССИЯ",
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    tasks: tasks.map((task) => normalizeTask(task)),
+  };
+}
+
+function exportBackup() {
+  const payload = createBackupPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `assiya-backup-${todayISO()}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  showToast("Резервная копия подготовлена. Файл можно сохранить в надёжное место.");
+}
+
+function handleBackupFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const mode = document.querySelector("[name='backupImportMode']")?.value === "replace" ? "replace" : "merge";
+  const reader = new FileReader();
+
+  reader.addEventListener("load", () => {
+    importBackupText(String(reader.result || ""), mode);
+    input.value = "";
+  });
+
+  reader.addEventListener("error", () => {
+    input.value = "";
+    showToast("Файл не удалось прочитать. Текущие задачи остались на месте.");
+  });
+
+  reader.readAsText(file);
+}
+
+function importBackupText(text, mode = "merge") {
+  const currentTasks = appState.tasks;
+
+  try {
+    const parsed = JSON.parse(text);
+    const importedTasks = validateBackupPayload(parsed);
+
+    appState.tasks = mode === "replace" ? importedTasks : mergeImportedTasks(currentTasks, importedTasks);
+    saveTasks();
+    resetFilters();
+    appState.modalOpen = false;
+    appState.editingId = null;
+    appState.editingDate = null;
+    showToast(mode === "replace" ? "Резервная копия загружена. Я заменила список задач." : "Резервная копия загружена. Я объединила задачи по id.");
+  } catch {
+    appState.tasks = currentTasks;
+    showToast("Этот JSON не похож на резервную копию АССИИ. Текущие задачи не изменились.");
+  }
+}
+
+function validateBackupPayload(payload) {
+  if (!payload || typeof payload !== "object" || payload.app !== "АССИЯ" || !Array.isArray(payload.tasks)) {
+    throw new Error("Invalid backup payload");
+  }
+
+  if (!Number.isFinite(payload.version) || payload.version < 1) {
+    throw new Error("Unsupported backup version");
+  }
+
+  return payload.tasks.map((task) => {
+    const normalizedTask = normalizeTask(task);
+
+    if (!normalizedTask.title.trim() || !isISODate(normalizedTask.date)) {
+      throw new Error("Invalid task in backup");
+    }
+
+    return normalizedTask;
+  });
+}
+
+function mergeImportedTasks(currentTasks, importedTasks) {
+  const merged = new Map(currentTasks.map((task) => [task.id, task]));
+  importedTasks.forEach((task) => merged.set(task.id, task));
+  return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date) || compareTaskTime(a, b) || a.title.localeCompare(b.title, "ru"));
+}
+
 function render() {
   document.getElementById("app").innerHTML = `
     ${appState.splashDone ? "" : Splash()}
@@ -263,7 +380,10 @@ function Dashboard() {
     <section class="dashboard page">
       <header class="topbar">
         ${Logo("small")}
-        <time class="date-stamp">${formatDateFull(date)}</time>
+        <div class="topbar-actions">
+          <time class="date-stamp">${formatDateFull(date)}</time>
+          ${ThemeToggle()}
+        </div>
       </header>
 
       <p class="greeting">${greeting}</p>
@@ -320,6 +440,8 @@ function Dashboard() {
         </div>
         ${appState.activeTab === "month" ? MonthPreview() : appState.activeTab === "week" ? WeekPreview() : TaskPreview(filteredTodayTasks)}
       </section>
+
+      ${BackupPanel()}
     </section>
   `;
 }
@@ -329,6 +451,16 @@ function Logo(size = "") {
     <div class="logo ${size}" aria-label="АССИЯ">
       <span>А</span>
     </div>
+  `;
+}
+
+function ThemeToggle() {
+  const isDark = appState.theme === "dark";
+  return `
+    <button class="theme-toggle" type="button" data-action="toggle-theme" aria-pressed="${isDark}" aria-label="Переключить тему">
+      <span>${isDark ? "Светлая" : "Тёмная"}</span>
+      <i>${isDark ? "☼" : "☾"}</i>
+    </button>
   `;
 }
 
@@ -708,6 +840,34 @@ function AnalyticsPanel(period, tasks) {
         </div>
       </div>
     </section>
+  `;
+}
+
+function BackupPanel() {
+  return `
+    <details class="backup-panel" aria-label="Резервная копия">
+      <summary>
+        <span>Резервная копия</span>
+        <small>экспорт и импорт JSON</small>
+      </summary>
+      <div class="backup-content">
+        <p>Данные хранятся локально. Иногда можно сохранить JSON-файл, чтобы планы не зависели от очистки браузера.</p>
+        <div class="backup-actions">
+          <button class="text-button slim" type="button" data-action="export-backup">Скачать JSON</button>
+          <label class="field compact-field">
+            <span>Режим импорта</span>
+            <select name="backupImportMode">
+              <option value="merge">Объединить</option>
+              <option value="replace">Заменить</option>
+            </select>
+          </label>
+          <label class="text-button slim backup-file-button">
+            Загрузить JSON
+            <input name="backupFile" type="file" accept="application/json,.json" />
+          </label>
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -1288,6 +1448,23 @@ function bindEvents() {
       resetFilters();
       render();
     });
+  });
+
+  document.querySelectorAll("[data-action='toggle-theme']").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.theme = appState.theme === "dark" ? "light" : "dark";
+      applyTheme(appState.theme);
+      saveTheme(appState.theme);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='export-backup']").forEach((button) => {
+    button.addEventListener("click", exportBackup);
+  });
+
+  document.querySelectorAll("[name='backupFile']").forEach((input) => {
+    input.addEventListener("change", () => handleBackupFile(input));
   });
 
   document.querySelectorAll("[data-snooze-reminder]").forEach((button) => {
@@ -2129,5 +2306,13 @@ function escapeAttr(value) {
   return escapeHTML(value);
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("./sw.js").catch(() => {
+    // PWA-режим необязателен для работы локального планировщика.
+  });
+}
+
 render();
+registerServiceWorker();
 window.setInterval(checkReminders, 30000);
