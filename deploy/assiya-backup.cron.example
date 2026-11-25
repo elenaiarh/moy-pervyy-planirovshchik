@@ -1,0 +1,5 @@
+# Ежедневный SQLite backup АССИИ в 03:15.
+# Формат файла для /etc/cron.d: обязательно указывать пользователя.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 3 * * * root cd /var/www/myplaning.platunova-fin.ru && runuser -u assiya -- /usr/bin/npm run backup >> /var/log/assiya-backup.log 2>&1

@@ -5,6 +5,19 @@
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 5173",
-    "check": "node --check src/app.js"
+    "server": "node server/app.js",
+    "create-user": "node server/create-user.js",
+    "reset-password": "node server/reset-password.js",
+    "backup": "node server/backup-now.js",
+    "generate-vapid": "node server/generate-vapid.js",
+    "check": "node --check src/app.js && node --check server/app.js && node --check server/auth.js && node --check server/backup.js && node --check server/backup-now.js && node --check server/config.js && node --check server/database.js && node --check server/create-user.js && node --check server/reset-password.js && node --check server/generate-vapid.js && node --check server/push.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "web-push": "^3.6.7"
   }
 }

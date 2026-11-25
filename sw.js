@@ -1,19 +1,34 @@
-const CACHE_NAME = "assiya-static-v2";
+const CACHE_NAME = "assiya-static-v5";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./favicon.svg",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./icon-maskable-512.png",
+  "./apple-touch-icon.png",
   "./src/styles.css",
   "./src/app.js",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting()),
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.all(
+        STATIC_ASSETS.map(async (asset) => {
+          try {
+            const response = await fetch(asset, { cache: "reload" });
+            if (response.ok) {
+              await cache.put(asset, response);
+            }
+          } catch {
+            // Не срываем установку PWA, если отдельный файл не закешировался.
+          }
+        }),
+      );
+      return self.skipWaiting();
+    }),
   );
 });
 
@@ -51,5 +66,48 @@ self.addEventListener("fetch", (event) => {
 
       return cachedResponse || networkResponsePromise.catch(() => Response.error());
     }),
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+
+  const title = payload.title || "АССИЯ напоминает";
+  const options = {
+    body: payload.body || "У тебя есть задача, которая ждёт внимания.",
+    icon: "./icon-192.png",
+    badge: "./icon-192.png",
+    data: {
+      url: payload.url || "./",
+      taskId: payload.taskId || "",
+    },
+    tag: payload.taskId ? `assiya-task-${payload.taskId}` : "assiya-reminder",
+    renotify: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "./", self.location.origin).href;
+
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        const existingClient = clientList.find((client) => client.url.startsWith(self.location.origin));
+        if (existingClient) {
+          existingClient.focus();
+          return existingClient.navigate(targetUrl);
+        }
+        return clients.openWindow(targetUrl);
+      }),
   );
 });

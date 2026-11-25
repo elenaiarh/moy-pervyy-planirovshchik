@@ -1,1 +1,11 @@
 *.swp
+node_modules/
+.npm-cache/
+data/
+.env
+.playwright-mcp/
+challenge.txt*
+filter-*-preview.png
+filter-live-after.png
+login-password-save-preview.png
+mobile-*.png

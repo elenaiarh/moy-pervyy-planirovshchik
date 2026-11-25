@@ -65,6 +65,18 @@ select {
   font: inherit;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 button {
   color: inherit;
   cursor: pointer;
@@ -242,6 +254,23 @@ svg {
   color: var(--accent);
   font-style: normal;
   line-height: 1;
+}
+
+.logout-button {
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 168, 108, 0.45);
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: rgba(255, 246, 235, 0.32);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(196, 168, 108, 0.16);
 }
 
 .greeting {
@@ -679,6 +708,72 @@ svg {
   background: rgba(255, 246, 235, 0.34);
 }
 
+.filter-panel,
+.analytics-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.filter-panel summary,
+.analytics-panel summary {
+  min-height: 58px;
+  padding: 14px 17px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.filter-panel summary::-webkit-details-marker,
+.analytics-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.filter-panel summary::after,
+.analytics-panel summary::after {
+  content: "+";
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 168, 108, 0.55);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 18px;
+}
+
+.filter-panel[open] summary::after,
+.analytics-panel[open] summary::after {
+  content: "−";
+}
+
+.filter-panel summary span,
+.analytics-panel summary span {
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.filter-panel summary small,
+.analytics-panel summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.filter-content,
+.analytics-content {
+  padding: 0 17px 17px;
+}
+
 .backup-panel {
   margin-top: 30px;
   padding: 0;
@@ -744,11 +839,21 @@ svg {
   line-height: 1.35;
 }
 
+.push-hint {
+  margin-top: 12px !important;
+  font-size: 16px !important;
+}
+
 .backup-actions {
   display: flex;
   align-items: end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.backup-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .backup-actions .compact-field {
@@ -950,6 +1055,14 @@ svg {
   white-space: nowrap;
 }
 
+.checklist-label,
+.attachment-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .reminder-note {
   margin: -6px 0 16px;
   padding: 10px 12px;
@@ -1055,6 +1168,38 @@ svg {
 .week-preview-day b {
   font-family: var(--mono);
   font-size: 26px;
+}
+
+.week-preview-day em {
+  min-height: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  font-style: normal;
+}
+
+.week-preview-day em i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--dot);
+}
+
+.week-preview-day em .work {
+  --dot: var(--work);
+}
+
+.week-preview-day em .self {
+  --dot: var(--self);
+}
+
+.week-preview-day em .together {
+  --dot: var(--together);
+}
+
+.week-preview-day em .done {
+  --dot: #b0b0b0;
 }
 
 .icon-button {
@@ -1594,6 +1739,23 @@ svg {
   line-height: 1.3;
 }
 
+.schedule-warning {
+  margin: -6px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid rgba(212, 160, 144, 0.42);
+  border-radius: 8px;
+  color: var(--overdue);
+  background: rgba(212, 160, 144, 0.12);
+  font-family: var(--serif);
+  font-size: 17px;
+  font-style: italic;
+  line-height: 1.35;
+}
+
+.schedule-warning.is-hidden {
+  display: none;
+}
+
 .gentle-panel {
   position: fixed;
   left: 50%;
@@ -1716,7 +1878,8 @@ svg {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   border: 1px solid rgba(43, 58, 74, 0.18);
   border-radius: 7px;
@@ -1724,6 +1887,115 @@ svg {
   color: var(--text);
   background: rgba(245, 230, 211, 0.7);
   outline-color: var(--accent);
+  font: inherit;
+}
+
+.field textarea {
+  min-height: 86px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.task-extra {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px dashed rgba(196, 168, 108, 0.48);
+  border-radius: 8px;
+  background: rgba(245, 230, 211, 0.34);
+}
+
+.task-extra-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.task-extra-head > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.checklist-items {
+  display: grid;
+  gap: 8px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.checklist-item > label {
+  margin: 0;
+  display: grid;
+  place-items: center;
+}
+
+.checklist-item input[name="checklistTitle"] {
+  width: 100%;
+  border: 1px solid rgba(43, 58, 74, 0.18);
+  border-radius: 7px;
+  padding: 10px;
+  color: var(--text);
+  background: rgba(255, 246, 235, 0.66);
+}
+
+.checklist-remove {
+  width: 34px;
+  height: 34px;
+}
+
+.extra-note {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.attachment-upload {
+  position: relative;
+  overflow: hidden;
+}
+
+.attachment-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(43, 58, 74, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 246, 235, 0.46);
+}
+
+.attachment-row a {
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-row small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .client-field {
@@ -1902,6 +2174,8 @@ svg {
 :root[data-theme="dark"] .panel-actions button,
 :root[data-theme="dark"] .field input,
 :root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .checklist-item input[name="checklistTitle"],
 :root[data-theme="dark"] .icon-switch button,
 :root[data-theme="dark"] .focus-matrix button {
   background-color: rgba(245, 230, 211, 0.08);
@@ -1914,7 +2188,9 @@ svg {
 :root[data-theme="dark"] .air-block,
 :root[data-theme="dark"] .empty-state,
 :root[data-theme="dark"] .client-empty,
-:root[data-theme="dark"] .reminder-note {
+:root[data-theme="dark"] .reminder-note,
+:root[data-theme="dark"] .task-extra,
+:root[data-theme="dark"] .attachment-row {
   background-color: rgba(245, 230, 211, 0.07);
 }
 
@@ -2074,6 +2350,84 @@ svg {
   }
 }
 
+@media (max-width: 700px) {
+  .month-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    gap: 3px;
+    overflow-x: visible;
+  }
+
+  .month-weekday {
+    padding-inline: 0;
+    font-size: 9px;
+  }
+
+  .month-day {
+    min-width: 0;
+    min-height: 58px;
+    padding: 5px 2px;
+    grid-template-rows: auto auto;
+    align-content: start;
+    gap: 3px;
+    border-radius: 7px;
+    overflow: hidden;
+    text-align: center;
+    touch-action: manipulation;
+  }
+
+  .month-day header {
+    justify-content: center;
+    gap: 3px;
+  }
+
+  .month-day header b {
+    font-size: 12px;
+  }
+
+  .month-day header span {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    font-size: 8px;
+  }
+
+  .month-dots {
+    justify-content: center;
+    gap: 3px;
+    flex-wrap: wrap;
+    min-height: 15px;
+  }
+
+  .month-dots i,
+  .month-task-list i {
+    width: 7px;
+    height: 7px;
+    flex-basis: 7px;
+    margin-top: 1px;
+    opacity: 1;
+    box-shadow: 0 0 0 1px rgba(255, 246, 235, 0.7);
+  }
+
+  .month-task-list {
+    min-height: 10px;
+    display: grid;
+    place-items: center;
+  }
+
+  .month-task-list p {
+    display: none;
+  }
+
+  .month-task-list small {
+    display: block;
+    margin-top: -1px;
+    font-size: 8px;
+    line-height: 1;
+  }
+}
+
 @media (max-width: 620px) {
   .shell {
     padding-top: 16px;
@@ -2081,6 +2435,19 @@ svg {
 
   .topbar {
     align-items: flex-start;
+  }
+
+  .sub-topbar {
+    gap: 8px;
+  }
+
+  .sub-topbar h1 {
+    font-size: clamp(23px, 6.7vw, 27px);
+    line-height: 1.08;
+  }
+
+  .sub-topbar .today-button {
+    padding: 8px 12px;
   }
 
   .topbar-actions {
@@ -2091,6 +2458,13 @@ svg {
 
   .balance-panel {
     padding: 18px;
+  }
+
+  .big-time {
+    margin: 18px 0 20px;
+    font-size: clamp(46px, 17vw, 66px);
+    line-height: 1;
+    letter-spacing: -0.04em;
   }
 
   .mini-calendar {
@@ -2128,6 +2502,31 @@ svg {
     align-items: stretch;
   }
 
+  .filter-panel summary,
+  .analytics-panel summary {
+    min-height: 54px;
+    padding: 13px 15px;
+    align-items: flex-start;
+  }
+
+  .filter-panel summary span,
+  .analytics-panel summary span {
+    font-size: 24px;
+  }
+
+  .filter-panel summary small,
+  .analytics-panel summary small {
+    padding-top: 3px;
+    font-size: 11px;
+    white-space: normal;
+    text-align: right;
+  }
+
+  .filter-content,
+  .analytics-content {
+    padding: 0 15px 15px;
+  }
+
   .backup-actions .compact-field {
     width: 100%;
   }
@@ -2163,40 +2562,79 @@ svg {
   }
 
   .month-grid {
-    grid-template-columns: repeat(7, minmax(92px, 1fr));
-    gap: 4px;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    gap: 3px;
+    overflow-x: visible;
   }
 
   .month-weekday {
     padding-inline: 0;
-    font-size: 10px;
+    font-size: 9px;
   }
 
   .month-day {
-    min-height: 96px;
-    padding: 7px;
-    gap: 5px;
+    min-width: 0;
+    min-height: 58px;
+    padding: 5px 2px;
+    grid-template-rows: auto auto;
+    align-content: start;
+    gap: 3px;
+    border-radius: 7px;
+    overflow: hidden;
+    text-align: center;
+    touch-action: manipulation;
+  }
+
+  .month-day header {
+    justify-content: center;
+    gap: 3px;
   }
 
   .month-day header b {
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .month-day header span {
-    width: 22px;
-    height: 22px;
-    flex-basis: 22px;
-    font-size: 10px;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    font-size: 8px;
+  }
+
+  .month-dots {
+    justify-content: center;
+    gap: 3px;
+    flex-wrap: wrap;
+    min-height: 15px;
+  }
+
+  .month-dots i,
+  .month-task-list i {
+    width: 7px;
+    height: 7px;
+    flex-basis: 7px;
+    margin-top: 1px;
+    opacity: 1;
+    box-shadow: 0 0 0 1px rgba(255, 246, 235, 0.7);
   }
 
   .month-task-list p {
-    margin-bottom: 0;
-    font-size: 9.5px;
-    line-height: 1.15;
+    display: none;
   }
 
-  .month-task-list p:nth-child(n + 2) {
-    display: none;
+  .month-task-list {
+    min-height: 10px;
+    display: grid;
+    place-items: center;
+  }
+
+  .month-task-list small {
+    display: block;
+    margin-top: -1px;
+    font-size: 8px;
+    line-height: 1;
   }
 
   .modal-backdrop {

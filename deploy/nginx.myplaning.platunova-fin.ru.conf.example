@@ -1,0 +1,20 @@
+# Пример отдельного Nginx server-блока только для myplaning.platunova-fin.ru.
+# Не вставлять в существующие конфиги других сайтов.
+# Перед применением обязательно выполнить read-only аудит nginx -T.
+
+server {
+    listen 80;
+    server_name myplaning.platunova-fin.ru;
+
+    location / {
+        proxy_pass http://127.0.0.1:3020;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTPS-блок добавлять через certbot или вручную только после проверки,
+# есть ли уже сертификаты и правила для этого домена на VPS.

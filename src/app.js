@@ -148,6 +148,20 @@ const appState = {
 };
 
 let toastTimer = null;
+const serverState = {
+  mode: "local",
+  loaded: false,
+  saveTimer: null,
+  saveInFlight: false,
+  saveQueued: false,
+  pushConfigured: false,
+  pushPublicKey: "",
+  pushSubscribed: false,
+  pushSupported: false,
+  pushLoading: false,
+  pushChecked: false,
+  pushCheckFailed: false,
+};
 
 applyTheme(appState.theme);
 
@@ -191,6 +205,38 @@ function normalizeTask(task) {
     recurrenceExceptionDates: Array.isArray(task.recurrenceExceptionDates) ? task.recurrenceExceptionDates.filter(isISODate) : [],
     sourceTaskId: typeof task.sourceTaskId === "string" ? task.sourceTaskId : "",
     createdAt: Number.isFinite(task.createdAt) ? task.createdAt : Date.now(),
+    description: typeof task.description === "string" ? task.description : "",
+    notes: typeof task.notes === "string" ? task.notes : "",
+    checklistItems: normalizeChecklistItems(task.checklistItems),
+    attachments: Array.isArray(task.attachments) ? task.attachments.map(normalizeAttachment).filter(Boolean) : [],
+  };
+}
+
+function normalizeChecklistItems(items) {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item, index) => ({
+      id: typeof item?.id === "string" && item.id ? item.id : crypto.randomUUID(),
+      title: typeof item?.title === "string" ? item.title.trim() : "",
+      completed: Boolean(item?.completed),
+      position: Number.isFinite(item?.position) ? item.position : index,
+    }))
+    .filter((item) => item.title)
+    .sort((a, b) => a.position - b.position);
+}
+
+function normalizeAttachment(attachment) {
+  if (!attachment || typeof attachment !== "object" || typeof attachment.id !== "string") return null;
+
+  return {
+    id: attachment.id,
+    taskId: typeof attachment.taskId === "string" ? attachment.taskId : "",
+    originalName: typeof attachment.originalName === "string" ? attachment.originalName : "Файл",
+    mimeType: typeof attachment.mimeType === "string" ? attachment.mimeType : "application/octet-stream",
+    sizeBytes: Number.isFinite(attachment.sizeBytes) ? attachment.sizeBytes : 0,
+    createdAt: typeof attachment.createdAt === "string" ? attachment.createdAt : "",
+    url: typeof attachment.url === "string" ? attachment.url : `/api/attachments/${attachment.id}/download`,
   };
 }
 
@@ -208,7 +254,475 @@ function isISODate(value) {
 }
 
 function saveTasks() {
+  if (serverState.mode === "server") {
+    scheduleServerTaskSync();
+    return;
+  }
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.tasks));
+}
+
+async function loadServerTasks() {
+  try {
+    const response = await fetch("/api/tasks", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      serverState.loaded = true;
+      return;
+    }
+
+    const payload = await response.json();
+    if (!Array.isArray(payload.tasks)) {
+      serverState.loaded = true;
+      return;
+    }
+
+    serverState.mode = "server";
+    serverState.loaded = true;
+    appState.tasks = payload.tasks.map(normalizeTask);
+    initPushState();
+    render();
+  } catch {
+    serverState.loaded = true;
+  }
+}
+
+function scheduleServerTaskSync() {
+  if (!serverState.loaded) return;
+  if (serverState.saveTimer) window.clearTimeout(serverState.saveTimer);
+  serverState.saveTimer = window.setTimeout(syncTasksToServer, 250);
+}
+
+async function syncTasksToServer() {
+  if (serverState.mode !== "server") return;
+  if (serverState.saveInFlight) {
+    serverState.saveQueued = true;
+    return;
+  }
+
+  serverState.saveInFlight = true;
+  serverState.saveQueued = false;
+
+  try {
+    const response = await fetch("/api/tasks", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tasks: appState.tasks.map(normalizeTask) }),
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Task sync failed");
+    }
+  } catch {
+    showToast("Не удалось сохранить задачи на сервере. Проверь соединение — я попробую снова при следующем изменении.");
+  } finally {
+    serverState.saveInFlight = false;
+    if (serverState.saveQueued) {
+      scheduleServerTaskSync();
+    }
+  }
+}
+
+async function logout() {
+  if (serverState.mode !== "server") return;
+
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+  } finally {
+    window.location.href = "/login";
+  }
+}
+
+async function createServerBackup({ download = false } = {}) {
+  if (serverState.mode !== "server") {
+    showToast("SQLite backup доступен только в серверной версии после входа.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/backups", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Backup failed");
+    }
+
+    const payload = await response.json();
+    const fileName = payload.backup?.fileName;
+    showToast("SQLite backup создан. Спокойно: свежая копия уже на сервере.");
+
+    if (download && fileName) {
+      window.location.href = `/api/backups/${encodeURIComponent(fileName)}/download`;
+    }
+  } catch {
+    showToast("Не удалось создать backup. Проверь соединение и попробуй ещё раз.");
+  }
+}
+
+async function downloadLatestServerBackup() {
+  if (serverState.mode !== "server") {
+    showToast("SQLite backup доступен только в серверной версии после входа.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/backups", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Backup list failed");
+    }
+
+    const payload = await response.json();
+    const latest = payload.backups?.[0];
+
+    if (!latest?.fileName) {
+      await createServerBackup({ download: true });
+      return;
+    }
+
+    window.location.href = `/api/backups/${encodeURIComponent(latest.fileName)}/download`;
+  } catch {
+    showToast("Не удалось скачать backup. Проверь соединение и попробуй ещё раз.");
+  }
+}
+
+function getChecklistItemsFromForm(form) {
+  return [...form.querySelectorAll("[data-checklist-row]")]
+    .map((row, index) => ({
+      id: row.querySelector("[name='checklistId']")?.value || crypto.randomUUID(),
+      title: row.querySelector("[name='checklistTitle']")?.value.trim() || "",
+      completed: Boolean(row.querySelector("[name='checklistCompleted']")?.checked),
+      position: index,
+    }))
+    .filter((item) => item.title);
+}
+
+async function uploadAttachment(taskId, file) {
+  if (serverState.mode !== "server") {
+    showToast("Вложения доступны в серверной версии после входа.");
+    return;
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    showToast("Файл больше 10 МБ. Давай выберем что-то легче.");
+    return;
+  }
+
+  const body = new FormData();
+  body.append("attachment", file);
+
+  try {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/attachments`, {
+      method: "POST",
+      credentials: "same-origin",
+      body,
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Attachment upload failed");
+    }
+
+    const payload = await response.json();
+    const attachment = normalizeAttachment(payload.attachment);
+    if (attachment) {
+      appState.tasks = appState.tasks.map((task) =>
+        task.id === taskId ? { ...task, attachments: [...(task.attachments || []), attachment] } : task,
+      );
+    }
+
+    showToast("Вложение добавлено.");
+    render();
+  } catch {
+    showToast("Не удалось добавить вложение. Проверь тип файла и соединение.");
+  }
+}
+
+async function deleteAttachment(attachmentId) {
+  if (serverState.mode !== "server" || !attachmentId) return;
+
+  try {
+    const response = await fetch(`/api/attachments/${encodeURIComponent(attachmentId)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Attachment delete failed");
+    }
+
+    appState.tasks = appState.tasks.map((task) => ({
+      ...task,
+      attachments: (task.attachments || []).filter((attachment) => attachment.id !== attachmentId),
+    }));
+
+    showToast("Вложение удалено.");
+    render();
+  } catch {
+    showToast("Не удалось удалить вложение. Попробуй ещё раз.");
+  }
+}
+
+async function initPushState() {
+  serverState.pushSupported = isPushSupported();
+  if (serverState.mode !== "server") {
+    return;
+  }
+
+  serverState.pushLoading = true;
+  serverState.pushCheckFailed = false;
+  render();
+
+  try {
+    const response = await withTimeout(
+      fetch("/api/push/config", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      }),
+      7000,
+      "Push config timeout",
+    );
+
+    if (!response.ok) {
+      throw new Error("Push config request failed");
+    }
+
+    const payload = await response.json();
+    serverState.pushConfigured = Boolean(payload.configured && payload.publicKey);
+    serverState.pushPublicKey = payload.publicKey || "";
+    serverState.pushChecked = true;
+
+    if (!serverState.pushSupported) {
+      serverState.pushSubscribed = false;
+      render();
+      return;
+    }
+
+    try {
+      const registration = await withTimeout(navigator.serviceWorker.ready, 7000, "Service worker timeout");
+      const subscription = await withTimeout(registration.pushManager.getSubscription(), 7000, "Push subscription check timeout");
+      serverState.pushSubscribed = Boolean(subscription);
+    } catch {
+      serverState.pushSubscribed = false;
+    }
+    render();
+  } catch {
+    serverState.pushConfigured = false;
+    serverState.pushPublicKey = "";
+    serverState.pushSubscribed = false;
+    serverState.pushCheckFailed = true;
+    render();
+  } finally {
+    serverState.pushLoading = false;
+    render();
+  }
+}
+
+async function enableServerPush() {
+  if (serverState.mode !== "server") {
+    showToast("Серверные push доступны в версии на VPS после входа.");
+    return;
+  }
+
+  if (!isPushSupported()) {
+    showToast("Этот браузер не поддерживает Web Push. Попробуй установленное PWA или другой браузер.");
+    return;
+  }
+
+  serverState.pushLoading = true;
+  render();
+
+  let pushStep = "проверка настроек";
+
+  try {
+    if (!serverState.pushPublicKey) {
+      await initPushState();
+    }
+
+    if (!serverState.pushConfigured || !serverState.pushPublicKey) {
+      showToast("На сервере ещё не настроены push-ключи. Я подготовила код, осталось добавить VAPID.");
+      return;
+    }
+
+    pushStep = "запрос разрешения";
+    const permission = await withTimeout(Notification.requestPermission(), 15000, "Notification permission timeout");
+    if (permission !== "granted") {
+      showToast("Без разрешения браузера push-уведомления не включатся.");
+      return;
+    }
+
+    pushStep = "подготовка приложения";
+    const registration = await ensureServiceWorkerRegistration();
+    pushStep = "проверка подписки";
+    let subscription = await withTimeout(registration.pushManager.getSubscription(), 7000, "Push subscription check timeout");
+
+    if (!subscription) {
+      pushStep = "создание подписки";
+      subscription = await withTimeout(
+        registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(serverState.pushPublicKey),
+        }),
+        20000,
+        "Push subscription timeout",
+      );
+    }
+
+    pushStep = "сохранение подписки";
+    const response = await withTimeout(
+      fetch("/api/push/subscriptions", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ subscription: subscription.toJSON() }),
+      }),
+      10000,
+      "Push subscription save timeout",
+    );
+
+    if (!response.ok) {
+      throw new Error("Push subscription save failed");
+    }
+
+    serverState.pushSubscribed = true;
+    showToast("Серверные push-уведомления включены. АССИЯ сможет напомнить о задачах мягко и вовремя.");
+  } catch {
+    showToast(`Push остановился на шаге «${pushStep}». Закрой и открой приложение с экрана «Домой», затем попробуй ещё раз.`);
+  } finally {
+    serverState.pushLoading = false;
+    render();
+  }
+}
+
+async function disableServerPush() {
+  if (!isPushSupported()) return;
+
+  serverState.pushLoading = true;
+  render();
+
+  try {
+    const registration = await withTimeout(navigator.serviceWorker.ready, 7000, "Service worker timeout");
+    const subscription = await withTimeout(registration.pushManager.getSubscription(), 7000, "Push subscription check timeout");
+
+    if (subscription) {
+      await fetch("/api/push/subscriptions", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ subscription: subscription.toJSON() }),
+      }).catch(() => {});
+      await subscription.unsubscribe();
+    }
+
+    serverState.pushSubscribed = false;
+    showToast("Push-уведомления отключены для этого устройства.");
+  } catch {
+    showToast("Не удалось отключить push здесь. Можно проверить разрешения браузера вручную.");
+  } finally {
+    serverState.pushLoading = false;
+    render();
+  }
+}
+
+function withTimeout(promise, timeoutMs, message = "Timeout") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
+async function ensureServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Service worker is not supported");
+  }
+
+  const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  await withTimeout(waitForServiceWorkerActivation(registration), 12000, "Service worker activation timeout");
+  return registration;
+}
+
+function waitForServiceWorkerActivation(registration) {
+  if (registration.active) {
+    return Promise.resolve(registration.active);
+  }
+
+  const worker = registration.installing || registration.waiting;
+  if (!worker) {
+    return navigator.serviceWorker.ready;
+  }
+
+  return new Promise((resolve, reject) => {
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "activated") resolve(worker);
+      if (worker.state === "redundant") reject(new Error("Service worker became redundant"));
+    });
+  });
+}
+
+function isPushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
 function loadTheme() {
@@ -335,7 +849,7 @@ function mergeImportedTasks(currentTasks, importedTasks) {
   return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date) || compareTaskTime(a, b) || a.title.localeCompare(b.title, "ru"));
 }
 
-function render() {
+function render(options = {}) {
   document.getElementById("app").innerHTML = `
     ${appState.splashDone ? "" : Splash()}
     <main class="shell ${appState.splashDone ? "is-visible" : ""}">
@@ -356,6 +870,10 @@ function render() {
   drawWeeklyBars();
   checkReminders();
 
+  if (options.scrollTop) {
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
+  }
+
   if (!appState.splashDone) {
     window.setTimeout(() => {
       appState.splashDone = true;
@@ -363,6 +881,10 @@ function render() {
       render();
     }, 2600);
   }
+}
+
+function renderAtTop() {
+  render({ scrollTop: true });
 }
 
 function Splash() {
@@ -395,6 +917,7 @@ function Dashboard() {
         <div class="topbar-actions">
           <time class="date-stamp">${formatDateFull(date)}</time>
           ${ThemeToggle()}
+          ${AuthControls()}
         </div>
       </header>
 
@@ -453,6 +976,8 @@ function Dashboard() {
         ${appState.activeTab === "month" ? MonthPreview() : appState.activeTab === "week" ? WeekPreview() : TaskPreview(filteredTodayTasks)}
       </section>
 
+      ${PushPanel()}
+
       ${BackupPanel()}
     </section>
   `;
@@ -476,11 +1001,21 @@ function ThemeToggle() {
   `;
 }
 
+function AuthControls() {
+  if (serverState.mode !== "server") return "";
+
+  return `
+    <button class="logout-button" type="button" data-action="logout">
+      Выйти
+    </button>
+  `;
+}
+
 function OverdueStrip(count) {
   return `
     <button class="overdue-strip" type="button" data-action="open-overdue">
       <span class="clock-icon"></span>
-      <span>Эти задачи ждут твоего внимания. Ты займёшься ими, когда будешь готова.</span>
+      <span>Эти задачи ждут твоего внимания. Ты займёшься ими, когда будешь готова</span>
       <b>${count}</b>
     </button>
   `;
@@ -513,7 +1048,7 @@ function MiniCalendar() {
 
 function TaskPreview(tasks) {
   if (!tasks.length) {
-    return `<div class="empty-state">У тебя есть свободное время. Наслаждайся паузой или добавь что-то важное.</div>`;
+    return `<div class="empty-state">У тебя есть свободное время. Наслаждайся паузой или добавь что-то важное</div>`;
   }
 
   return `
@@ -556,7 +1091,22 @@ function MonthPreview() {
   return `
     <div class="week-preview">
       ${daysWithTasks
-        .map((day) => `<button type="button" data-date="${day.iso}" class="week-preview-day"><span>${capitalize(formatWeekday(parseISO(day.iso), "short"))}</span><b>${parseISO(day.iso).getDate()}</b><small>${day.count} задач</small></button>`)
+        .map((day) => {
+          const statsForDay = getStats(getTasksForDate(day.iso));
+          return `
+            <button type="button" data-date="${day.iso}" class="week-preview-day">
+              <span>${capitalize(formatWeekday(parseISO(day.iso), "short"))}</span>
+              <b>${parseISO(day.iso).getDate()}</b>
+              <em aria-label="Баланс дня">
+                ${statsForDay.work ? `<i class="work" title="Рабочие: ${statsForDay.work}"></i>` : ""}
+                ${statsForDay.self ? `<i class="self" title="Я: ${statsForDay.self}"></i>` : ""}
+                ${statsForDay.together ? `<i class="together" title="Мы: ${statsForDay.together}"></i>` : ""}
+                ${statsForDay.completed ? `<i class="done" title="Выполненные: ${statsForDay.completed}"></i>` : ""}
+              </em>
+              <small>${day.count} задач</small>
+            </button>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -613,7 +1163,7 @@ function DayScreen() {
         }
       </section>
 
-      <p class="bottom-note">${remaining ? `Ещё ${remaining} ${declOfNum(remaining, ["задача", "задачи", "задач"])} — и день станет легче.` : "Отличный день! Ты сделала всё, что было в твоих силах."}</p>
+      <p class="bottom-note">${remaining ? `Ещё ${remaining} ${declOfNum(remaining, ["задача", "задачи", "задач"])} — и день станет легче` : "Отличный день! Ты сделала всё, что было в твоих силах"}</p>
     </section>
   `;
 }
@@ -626,6 +1176,8 @@ function ActiveTaskCard(task) {
         <h3>${escapeHTML(task.title)}</h3>
         ${ClientLabel(task)}
         ${ReminderLabel(task)}
+        ${ChecklistLabel(task)}
+        ${AttachmentsLabel(task)}
         <p>${getDeadlineCopy(task)}</p>
       </div>
       <div class="task-actions">
@@ -647,6 +1199,8 @@ function TaskRow(task, dateISO, allowOpen = false, showMove = false) {
         <span>${escapeHTML(task.title)}</span>
         ${ClientLabel(task)}
         ${ReminderLabel(task)}
+        ${ChecklistLabel(task)}
+        ${AttachmentsLabel(task)}
       </div>
       <i class="mini-icon ${taskClass(task)}" title="${categoryLabel(task)}">${CategoryIcon(task)}</i>
       <em class="focus-dot" style="--focus:${focusMeta[task.focus].color}" title="${focusMeta[task.focus].label}"></em>
@@ -679,6 +1233,17 @@ function ReminderLabel(task) {
   return `<small class="reminder-label">${task.reminderDone ? "Напоминание отправлено" : `Напомнить ${formatReminderText(task.reminderAt)}`}</small>`;
 }
 
+function ChecklistLabel(task) {
+  if (!task.checklistItems?.length) return "";
+  const completed = task.checklistItems.filter((item) => item.completed).length;
+  return `<small class="checklist-label">Чек-лист ${completed}/${task.checklistItems.length}</small>`;
+}
+
+function AttachmentsLabel(task) {
+  if (!task.attachments?.length) return "";
+  return `<small class="attachment-label">Вложения: ${task.attachments.length}</small>`;
+}
+
 function TaskTimeLabel(task) {
   if (task.allDay) return "Весь день";
   return task.end ? `${task.start} – ${task.end}` : `С ${task.start}`;
@@ -695,7 +1260,7 @@ function ClientSummary(clientStats, source, tasks = []) {
           <h2>Клиенты дня</h2>
           <span>${workTotal} ${declOfNum(workTotal, ["рабочая задача", "рабочие задачи", "рабочих задач"])}</span>
         </div>
-        <div class="client-empty">Рабочие задачи с клиентами появятся здесь. Клиент поможет увидеть нагрузку мягче и точнее.</div>
+        <div class="client-empty">Рабочие задачи с клиентами появятся здесь. Клиент поможет увидеть нагрузку мягче и точнее</div>
       </section>
     `;
   }
@@ -746,155 +1311,228 @@ function FocusMatrixSummary(tasks) {
 function FilterPanel(allTasks, filteredTasks) {
   const clientOptions = getClientStats(allTasks);
   const activeCount = getActiveFilterCount();
+  const activeCopy = activeCount ? `${activeCount} ${declOfNum(activeCount, ["фильтр", "фильтра", "фильтров"])}` : "нет активных";
 
   return `
-    <section class="filter-panel" aria-label="Фильтры и поиск">
-      <div class="section-head compact-head">
-        <h2>Поиск и фильтры</h2>
-        <span>${filteredTasks.length} из ${allTasks.length}</span>
+    <details class="filter-panel" aria-label="Фильтры и поиск">
+      <summary>
+        <span>Поиск и фильтры</span>
+        <small>${filteredTasks.length} из ${allTasks.length} · ${activeCopy}</small>
+      </summary>
+      <div class="filter-content">
+        <div class="filter-grid">
+          <label class="field compact-field">
+            <span>Дата</span>
+            <input name="dateFilter" type="date" value="${appState.selectedDate}" />
+          </label>
+          <label class="field compact-field">
+            <span>Поиск по клиенту</span>
+            <input name="clientSearch" placeholder="Например, Анна" value="${escapeAttr(appState.clientSearch)}" />
+          </label>
+          <label class="field compact-field">
+            <span>Клиент</span>
+            <select name="clientFilter">
+              <option value="all" ${appState.clientFilter === "all" ? "selected" : ""}>Все клиенты</option>
+              ${clientOptions.map((item) => `<option value="${escapeAttr(item.client)}" ${appState.clientFilter === item.client ? "selected" : ""}>${escapeHTML(item.client)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>Категория</span>
+            <select name="categoryFilter">
+              <option value="all" ${appState.categoryFilter === "all" ? "selected" : ""}>Все категории</option>
+              ${Object.entries(categoryMeta).map(([key, meta]) => `<option value="${key}" ${appState.categoryFilter === key ? "selected" : ""}>${meta.label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>Статус</span>
+            <select name="statusFilter">
+              <option value="all" ${appState.statusFilter === "all" ? "selected" : ""}>Все статусы</option>
+              <option value="completed" ${appState.statusFilter === "completed" ? "selected" : ""}>Выполненные</option>
+              <option value="pending" ${appState.statusFilter === "pending" ? "selected" : ""}>Не выполненные</option>
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>Просрочка</span>
+            <select name="overdueFilter">
+              <option value="all" ${appState.overdueFilter === "all" ? "selected" : ""}>Все задачи</option>
+              <option value="overdue" ${appState.overdueFilter === "overdue" ? "selected" : ""}>Просроченные</option>
+              <option value="notOverdue" ${appState.overdueFilter === "notOverdue" ? "selected" : ""}>Без просрочки</option>
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>Повтор</span>
+            <select name="repeatFilter">
+              <option value="all" ${appState.repeatFilter === "all" ? "selected" : ""}>Любой повтор</option>
+              <option value="none" ${appState.repeatFilter === "none" ? "selected" : ""}>Нет</option>
+              <option value="weekly" ${appState.repeatFilter === "weekly" ? "selected" : ""}>Каждую неделю</option>
+              <option value="monthly" ${appState.repeatFilter === "monthly" ? "selected" : ""}>Каждый месяц</option>
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>Напоминания</span>
+            <select name="reminderFilter">
+              <option value="all" ${appState.reminderFilter === "all" ? "selected" : ""}>Все задачи</option>
+              <option value="with" ${appState.reminderFilter === "with" ? "selected" : ""}>С напоминанием</option>
+              <option value="without" ${appState.reminderFilter === "without" ? "selected" : ""}>Без напоминания</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button class="text-button slim" type="button" data-action="reset-filters">Сбросить фильтры${activeCount ? ` · ${activeCount}` : ""}</button>
+        </div>
       </div>
-      <div class="filter-grid">
-        <label class="field compact-field">
-          <span>Дата</span>
-          <input name="dateFilter" type="date" value="${appState.selectedDate}" />
-        </label>
-        <label class="field compact-field">
-          <span>Поиск по клиенту</span>
-          <input name="clientSearch" placeholder="Например, Анна" value="${escapeAttr(appState.clientSearch)}" />
-        </label>
-        <label class="field compact-field">
-          <span>Клиент</span>
-          <select name="clientFilter">
-            <option value="all" ${appState.clientFilter === "all" ? "selected" : ""}>Все клиенты</option>
-            ${clientOptions.map((item) => `<option value="${escapeAttr(item.client)}" ${appState.clientFilter === item.client ? "selected" : ""}>${escapeHTML(item.client)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field compact-field">
-          <span>Категория</span>
-          <select name="categoryFilter">
-            <option value="all" ${appState.categoryFilter === "all" ? "selected" : ""}>Все категории</option>
-            ${Object.entries(categoryMeta).map(([key, meta]) => `<option value="${key}" ${appState.categoryFilter === key ? "selected" : ""}>${meta.label}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field compact-field">
-          <span>Статус</span>
-          <select name="statusFilter">
-            <option value="all" ${appState.statusFilter === "all" ? "selected" : ""}>Все статусы</option>
-            <option value="completed" ${appState.statusFilter === "completed" ? "selected" : ""}>Выполненные</option>
-            <option value="pending" ${appState.statusFilter === "pending" ? "selected" : ""}>Не выполненные</option>
-          </select>
-        </label>
-        <label class="field compact-field">
-          <span>Просрочка</span>
-          <select name="overdueFilter">
-            <option value="all" ${appState.overdueFilter === "all" ? "selected" : ""}>Все задачи</option>
-            <option value="overdue" ${appState.overdueFilter === "overdue" ? "selected" : ""}>Просроченные</option>
-            <option value="notOverdue" ${appState.overdueFilter === "notOverdue" ? "selected" : ""}>Без просрочки</option>
-          </select>
-        </label>
-        <label class="field compact-field">
-          <span>Повтор</span>
-          <select name="repeatFilter">
-            <option value="all" ${appState.repeatFilter === "all" ? "selected" : ""}>Любой повтор</option>
-            <option value="none" ${appState.repeatFilter === "none" ? "selected" : ""}>Нет</option>
-            <option value="weekly" ${appState.repeatFilter === "weekly" ? "selected" : ""}>Каждую неделю</option>
-            <option value="monthly" ${appState.repeatFilter === "monthly" ? "selected" : ""}>Каждый месяц</option>
-          </select>
-        </label>
-        <label class="field compact-field">
-          <span>Напоминания</span>
-          <select name="reminderFilter">
-            <option value="all" ${appState.reminderFilter === "all" ? "selected" : ""}>Все задачи</option>
-            <option value="with" ${appState.reminderFilter === "with" ? "selected" : ""}>С напоминанием</option>
-            <option value="without" ${appState.reminderFilter === "without" ? "selected" : ""}>Без напоминания</option>
-          </select>
-        </label>
-      </div>
-      <div class="filter-actions">
-        <button class="text-button slim" type="button" data-action="reset-filters">Сбросить фильтры${activeCount ? ` · ${activeCount}` : ""}</button>
-      </div>
-    </section>
+    </details>
   `;
 }
 
 function AnalyticsPanel(period, tasks) {
   const analytics = getAnalytics(period, appState.selectedDate, tasks);
+  const analyticsSummary = `Всего ${analytics.stats.total} · выполнено ${analytics.stats.completed}`;
 
   return `
-    <section class="analytics-panel" aria-label="Аналитика">
-      <div class="section-head compact-head">
-        <h2>Аналитика</h2>
-        <span>${analytics.periodLabel}</span>
-      </div>
-      <div class="analytics-grid">
-        <div class="analytics-card">
-          <span>Всего</span>
-          <b>${analytics.stats.total}</b>
-          <small>${analytics.completionPercent}% выполнено</small>
-        </div>
-        <div class="analytics-card">
-          <span>Выполнено</span>
-          <b>${analytics.stats.completed}</b>
-          <small>${analytics.pending} ждёт внимания</small>
-        </div>
-        <div class="analytics-card">
-          <span>Просрочка</span>
-          <b>${analytics.overdue}</b>
-          <small>без резкой тревоги</small>
-        </div>
-        <div class="analytics-card">
-          <span>Баланс</span>
-          <small>Рабочие ${analytics.stats.work} · Я ${analytics.stats.self} · Мы ${analytics.stats.together}</small>
-        </div>
-      </div>
-      <div class="analytics-columns">
-        <div>
-          <h3>Клиенты</h3>
-          ${
-            analytics.clientStats.length
-              ? analytics.clientStats.slice(0, 4).map((item) => `<p><span>${escapeHTML(item.client)}</span><b>${item.count}</b></p>`).join("")
-              : `<p class="muted-line">Рабочие задачи с клиентами появятся здесь.</p>`
-          }
-        </div>
-        <div>
-          <h3>Загруженные дни</h3>
-          ${
-            analytics.busiestDays.length
-              ? analytics.busiestDays.slice(0, 4).map((item) => `<p><span>${formatDateShort(parseISO(item.date))}</span><b>${item.count}</b></p>`).join("")
-              : `<p class="muted-line">Пока всё спокойно.</p>`
-          }
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function BackupPanel() {
-  return `
-    <details class="backup-panel" aria-label="Резервная копия">
+    <details class="analytics-panel" aria-label="Аналитика">
       <summary>
-        <span>Резервная копия</span>
-        <small>экспорт и импорт JSON</small>
+        <span>Аналитика</span>
+        <small>${analytics.periodLabel} · ${analyticsSummary}</small>
       </summary>
-      <div class="backup-content">
-        <p>Данные хранятся локально. Иногда можно сохранить JSON-файл, чтобы планы не зависели от очистки браузера.</p>
-        <div class="backup-actions">
-          <button class="text-button slim" type="button" data-action="export-backup">Скачать JSON</button>
-          <label class="field compact-field">
-            <span>Режим импорта</span>
-            <select name="backupImportMode">
-              <option value="merge">Объединить</option>
-              <option value="replace">Заменить</option>
-            </select>
-          </label>
-          <label class="text-button slim backup-file-button">
-            Загрузить JSON
-            <input name="backupFile" type="file" accept="application/json,.json" />
-          </label>
+      <div class="analytics-content">
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <span>Всего</span>
+            <b>${analytics.stats.total}</b>
+            <small>${analytics.completionPercent}% выполнено</small>
+          </div>
+          <div class="analytics-card">
+            <span>Выполнено</span>
+            <b>${analytics.stats.completed}</b>
+            <small>${analytics.pending} ждёт внимания</small>
+          </div>
+          <div class="analytics-card">
+            <span>Просрочка</span>
+            <b>${analytics.overdue}</b>
+            <small>без резкой тревоги</small>
+          </div>
+          <div class="analytics-card">
+            <span>Баланс</span>
+            <small>Рабочие ${analytics.stats.work} · Я ${analytics.stats.self} · Мы ${analytics.stats.together}</small>
+          </div>
+        </div>
+        <div class="analytics-columns">
+          <div>
+            <h3>Клиенты</h3>
+            ${
+              analytics.clientStats.length
+                ? analytics.clientStats.slice(0, 4).map((item) => `<p><span>${escapeHTML(item.client)}</span><b>${item.count}</b></p>`).join("")
+                : `<p class="muted-line">Рабочие задачи с клиентами появятся здесь</p>`
+            }
+          </div>
+          <div>
+            <h3>Загруженные дни</h3>
+            ${
+              analytics.busiestDays.length
+                ? analytics.busiestDays.slice(0, 4).map((item) => `<p><span>${formatDateShort(parseISO(item.date))}</span><b>${item.count}</b></p>`).join("")
+                : `<p class="muted-line">Пока всё спокойно.</p>`
+            }
+          </div>
         </div>
       </div>
     </details>
   `;
+}
+
+function BackupPanel() {
+  const isServerMode = serverState.mode === "server";
+
+  return `
+    <details class="backup-panel" aria-label="Резервная копия">
+      <summary>
+        <span>Резервная копия</span>
+        <small>${isServerMode ? "SQLite backup" : "экспорт и импорт JSON"}</small>
+      </summary>
+      <div class="backup-content">
+        ${
+          isServerMode
+            ? `
+              <p>Данные хранятся в SQLite на сервере. Можно создать свежую копию базы и скачать её вручную</p>
+              <div class="backup-actions">
+                <button class="text-button slim" type="button" data-action="create-server-backup">Создать backup</button>
+                <button class="text-button slim" type="button" data-action="download-server-backup">Скачать последний</button>
+              </div>
+            `
+            : `
+              <p>Данные хранятся локально. Иногда можно сохранить JSON-файл, чтобы планы не зависели от очистки браузера</p>
+              <div class="backup-actions">
+                <button class="text-button slim" type="button" data-action="export-backup">Скачать JSON</button>
+                <label class="field compact-field">
+                  <span>Режим импорта</span>
+                  <select name="backupImportMode">
+                    <option value="merge">Объединить</option>
+                    <option value="replace">Заменить</option>
+                  </select>
+                </label>
+                <label class="text-button slim backup-file-button">
+                  Загрузить JSON
+                  <input name="backupFile" type="file" accept="application/json,.json" />
+                </label>
+              </div>
+            `
+        }
+      </div>
+    </details>
+  `;
+}
+
+function PushPanel() {
+  const isServerMode = serverState.mode === "server";
+  const status = getPushStatusText();
+
+  return `
+    <details class="backup-panel notification-panel" aria-label="Уведомления">
+      <summary>
+        <span>Уведомления</span>
+        <small>${status}</small>
+      </summary>
+      <div class="backup-content">
+        ${
+          isServerMode
+            ? `
+              <p>Серверные push-уведомления могут приходить даже когда приложение закрыто. На iPhone они работают для приложения, добавленного на экран «Домой»</p>
+              <div class="backup-actions">
+                ${
+                  serverState.pushSubscribed
+                    ? `<button class="text-button slim" type="button" data-action="disable-push">Отключить push</button>`
+                    : `<button class="text-button slim" type="button" data-action="enable-push" ${serverState.pushLoading || !serverState.pushConfigured || !serverState.pushSupported ? "disabled" : ""}>Включить push</button>`
+                }
+                <button class="text-button slim" type="button" data-action="check-push" ${serverState.pushLoading ? "disabled" : ""}>Проверить</button>
+              </div>
+              ${
+                serverState.pushCheckFailed
+                  ? `<p class="push-hint">Не удалось проверить push-настройки. Проверь вход в приложение и соединение, затем нажми «Проверить»</p>`
+                  : serverState.pushConfigured
+                  ? `<p class="push-hint">${serverState.pushSupported ? "Если браузер спросит разрешение — выбери «Разрешить»" : "Этот браузер не поддерживает Web Push. Попробуй установленное PWA или другой браузер"}</p>`
+                  : serverState.pushChecked
+                    ? `<p class="push-hint">На сервере ещё нужно добавить VAPID-ключи. После этого кнопка станет активной</p>`
+                    : `<p class="push-hint">Проверяю push-настройки сервера</p>`
+              }
+            `
+            : `
+              <p>Сейчас открыт локальный режим. Обычные напоминания работают, пока АССИЯ открыта; серверные push включим в версии на VPS</p>
+            `
+        }
+      </div>
+    </details>
+  `;
+}
+
+function getPushStatusText() {
+  if (serverState.mode !== "server") return "локальные напоминания";
+  if (serverState.pushLoading) return "проверяю";
+  if (serverState.pushCheckFailed) return "не удалось проверить";
+  if (!serverState.pushSupported) return "не поддерживается";
+  if (serverState.pushSubscribed) return "push включены";
+  if (!serverState.pushChecked) return "ожидает проверки";
+  if (!serverState.pushConfigured) return "нужны ключи";
+  return "push выключены";
 }
 
 function AirBlock(block) {
@@ -1075,7 +1713,7 @@ function MonthScreen() {
           <span><i style="--dot:${palette.self}"></i>Я <b>${stats.self}</b></span>
           <span><i style="--dot:${palette.together}"></i>Мы <b>${stats.together}</b></span>
         </div>
-        ${clientStats.length ? `<p>Самый активный клиент: ${escapeHTML(clientStats[0].client)} · ${clientStats[0].count}</p>` : `<p>Рабочие задачи с клиентами появятся здесь, когда ты их добавишь.</p>`}
+        ${clientStats.length ? `<p>Самый активный клиент: ${escapeHTML(clientStats[0].client)} · ${clientStats[0].count}</p>` : `<p>Рабочие задачи с клиентами появятся здесь, когда ты их добавишь</p>`}
       </section>
 
       <section class="month-grid" aria-label="Календарь месяца">
@@ -1139,6 +1777,10 @@ function TaskModal() {
     care: true,
     reminderAt: "",
     reminderDone: false,
+    description: "",
+    notes: "",
+    checklistItems: [],
+    attachments: [],
   };
   const activeCategory = normalizeCategory(value.category);
 
@@ -1177,6 +1819,20 @@ function TaskModal() {
         </label>
 
         <label class="field">
+          <span>Описание</span>
+          <textarea name="description" rows="3" placeholder="Что важно помнить об этой задаче?">${escapeHTML(value.description || "")}</textarea>
+        </label>
+
+        <label class="field">
+          <span>Заметки</span>
+          <textarea name="notes" rows="3" placeholder="Мысли, ссылки или детали по ходу">${escapeHTML(value.notes || "")}</textarea>
+        </label>
+
+        ${ChecklistEditor(value)}
+
+        ${AttachmentEditor(value, Boolean(task))}
+
+        <label class="field">
           <span>Дата</span>
           <input name="date" type="date" value="${value.date}" required />
         </label>
@@ -1196,6 +1852,8 @@ function TaskModal() {
           <input name="allDay" type="checkbox" ${value.allDay ? "checked" : ""} />
           <span>Весь день</span>
         </label>
+
+        <p class="schedule-warning is-hidden" role="status"></p>
 
         <label class="care-check reminder-toggle">
           <input name="reminderEnabled" type="checkbox" ${value.reminderAt ? "checked" : ""} />
@@ -1241,6 +1899,72 @@ function TaskModal() {
   `;
 }
 
+function ChecklistEditor(task) {
+  const items = normalizeChecklistItems(task.checklistItems);
+
+  return `
+    <section class="task-extra checklist-editor">
+      <div class="task-extra-head">
+        <span>Чек-лист</span>
+        <button class="text-button slim" type="button" data-action="add-checklist-item">Добавить пункт</button>
+      </div>
+      <div class="checklist-items">
+        ${items.length ? items.map(ChecklistItemRow).join("") : ChecklistItemRow({ id: crypto.randomUUID(), title: "", completed: false })}
+      </div>
+    </section>
+  `;
+}
+
+function ChecklistItemRow(item) {
+  return `
+    <div class="checklist-item" data-checklist-row>
+      <input type="hidden" name="checklistId" value="${escapeAttr(item.id)}" />
+      <label>
+        <input name="checklistCompleted" type="checkbox" ${item.completed ? "checked" : ""} />
+        <span class="sr-only">Выполнено</span>
+      </label>
+      <input name="checklistTitle" placeholder="Пункт чек-листа" value="${escapeAttr(item.title || "")}" />
+      <button class="icon-button checklist-remove" type="button" data-action="remove-checklist-item" aria-label="Удалить пункт">${Icon("x")}</button>
+    </div>
+  `;
+}
+
+function AttachmentEditor(task, isExistingTask) {
+  const attachments = Array.isArray(task.attachments) ? task.attachments : [];
+  const uploadAvailable = serverState.mode === "server" && isExistingTask;
+
+  return `
+    <section class="task-extra attachment-editor">
+      <div class="task-extra-head">
+        <span>Вложения</span>
+        ${uploadAvailable ? `<label class="text-button slim attachment-upload">Добавить файл<input name="attachmentFile" type="file" /></label>` : ""}
+      </div>
+      ${
+        uploadAvailable
+          ? `<p class="extra-note">Можно прикрепить картинки, PDF и документы до 10 МБ. Файлы доступны только после входа.</p>`
+          : `<p class="extra-note">Вложения появятся после первого сохранения задачи в серверной версии.</p>`
+      }
+      <div class="attachment-list">
+        ${
+          attachments.length
+            ? attachments.map(AttachmentRow).join("")
+            : `<p class="muted-line">Пока вложений нет.</p>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function AttachmentRow(attachment) {
+  return `
+    <div class="attachment-row" data-attachment-id="${escapeAttr(attachment.id)}">
+      <a href="${escapeAttr(attachment.url)}" target="_blank" rel="noopener">${escapeHTML(attachment.originalName)}</a>
+      <small>${formatFileSize(attachment.sizeBytes)}</small>
+      ${serverState.mode === "server" ? `<button class="icon-button" type="button" data-delete-attachment="${escapeAttr(attachment.id)}" aria-label="Удалить вложение">${Icon("x")}</button>` : ""}
+    </div>
+  `;
+}
+
 function bindEvents() {
   document.querySelectorAll("[data-action='open-modal']").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1268,7 +1992,7 @@ function bindEvents() {
       if (button.dataset.tab === "week") appState.view = "week";
       if (button.dataset.tab === "month") appState.view = "month";
       if (button.dataset.tab === "day") appState.view = "day";
-      render();
+      renderAtTop();
     });
   });
 
@@ -1284,6 +2008,8 @@ function bindEvents() {
         button.classList.contains("week-preview-day")
       ) {
         appState.view = "day";
+        renderAtTop();
+        return;
       }
       render();
     });
@@ -1327,28 +2053,28 @@ function bindEvents() {
   document.querySelectorAll("[data-action='open-day']").forEach((button) => {
     button.addEventListener("click", () => {
       appState.view = "day";
-      render();
+      renderAtTop();
     });
   });
 
   document.querySelectorAll("[data-action='open-week']").forEach((button) => {
     button.addEventListener("click", () => {
       appState.view = "week";
-      render();
+      renderAtTop();
     });
   });
 
   document.querySelectorAll("[data-action='open-month']").forEach((button) => {
     button.addEventListener("click", () => {
       appState.view = "month";
-      render();
+      renderAtTop();
     });
   });
 
   document.querySelectorAll("[data-action='dashboard']").forEach((button) => {
     button.addEventListener("click", () => {
       appState.view = "dashboard";
-      render();
+      renderAtTop();
     });
   });
 
@@ -1489,8 +2215,32 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='logout']").forEach((button) => {
+    button.addEventListener("click", logout);
+  });
+
   document.querySelectorAll("[data-action='export-backup']").forEach((button) => {
     button.addEventListener("click", exportBackup);
+  });
+
+  document.querySelectorAll("[data-action='create-server-backup']").forEach((button) => {
+    button.addEventListener("click", () => createServerBackup());
+  });
+
+  document.querySelectorAll("[data-action='download-server-backup']").forEach((button) => {
+    button.addEventListener("click", downloadLatestServerBackup);
+  });
+
+  document.querySelectorAll("[data-action='enable-push']").forEach((button) => {
+    button.addEventListener("click", enableServerPush);
+  });
+
+  document.querySelectorAll("[data-action='check-push']").forEach((button) => {
+    button.addEventListener("click", initPushState);
+  });
+
+  document.querySelectorAll("[data-action='disable-push']").forEach((button) => {
+    button.addEventListener("click", disableServerPush);
   });
 
   document.querySelectorAll("[name='backupFile']").forEach((input) => {
@@ -1587,9 +2337,40 @@ function bindEvents() {
       });
     });
 
+    form.querySelectorAll("[data-action='add-checklist-item']").forEach((button) => {
+      button.addEventListener("click", () => {
+        form.querySelector(".checklist-items")?.insertAdjacentHTML(
+          "beforeend",
+          ChecklistItemRow({ id: crypto.randomUUID(), title: "", completed: false }),
+        );
+      });
+    });
+
+    form.querySelectorAll("[data-action='remove-checklist-item']").forEach((button) => {
+      button.addEventListener("click", () => {
+        button.closest("[data-checklist-row]")?.remove();
+      });
+    });
+
+    form.querySelectorAll("[name='attachmentFile']").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.files?.[0] && appState.editingId) {
+          uploadAttachment(appState.editingId, input.files[0]);
+        }
+        input.value = "";
+      });
+    });
+
+    form.querySelectorAll("[data-delete-attachment]").forEach((button) => {
+      button.addEventListener("click", () => {
+        deleteAttachment(button.dataset.deleteAttachment);
+      });
+    });
+
     form.allDay.addEventListener("change", () => {
       form.start.disabled = form.allDay.checked;
       form.end.disabled = form.allDay.checked;
+      updateScheduleWarning(form);
     });
 
     form.reminderEnabled.addEventListener("change", () => {
@@ -1598,6 +2379,13 @@ function bindEvents() {
         reminderField.classList.toggle("is-hidden", !form.reminderEnabled.checked);
       }
     });
+
+    ["date", "start", "end"].forEach((name) => {
+      form[name]?.addEventListener("input", () => updateScheduleWarning(form));
+      form[name]?.addEventListener("change", () => updateScheduleWarning(form));
+    });
+
+    updateScheduleWarning(form);
   }
 }
 
@@ -1650,6 +2438,13 @@ function handleTaskSubmit(event) {
     recurrenceExceptionDates: isRecurringEdit ? [] : existingTask?.recurrenceExceptionDates || [],
     sourceTaskId: isRecurringEdit ? existingTask.id : existingTask?.sourceTaskId || "",
     createdAt: existingTask?.createdAt || Date.now(),
+    description: String(data.get("description") || "").trim(),
+    notes: String(data.get("notes") || "").trim(),
+    checklistItems: getChecklistItemsFromForm(form),
+    attachments: existingTask?.attachments || [],
+  });
+  const conflict = findTaskConflict(task, date, {
+    excludeIds: getConflictExcludeIds(existingTask, isRecurringEdit),
   });
 
   if (isRecurringEdit) {
@@ -1677,13 +2472,109 @@ function handleTaskSubmit(event) {
     appState.overloadDate = date;
   }
   showToast(
-    dayIsOverloaded
+    conflict
+      ? `Это время уже занято задачей «${conflict.title}» (${formatTaskTimeRange(conflict)}). Я сохранила задачу, но обрати внимание на расписание.`
+      : dayIsOverloaded
       ? "Ты много запланировала. Давай посмотрим, что можно перенести, чтобы ты не выгорела."
       : missingWorkClient
         ? "Задача сохранена. Клиент поможет увидеть нагрузку, но я бережно сохраню задачу и без него."
         : "Задача сохранена. Я присмотрю за деталями.",
   );
   checkReminders();
+}
+
+function updateScheduleWarning(form) {
+  const warning = form.querySelector(".schedule-warning");
+  if (!warning) return;
+
+  const date = form.date?.value;
+  if (!isISODate(date)) {
+    warning.textContent = "";
+    warning.classList.add("is-hidden");
+    return;
+  }
+
+  const existingTask = appState.editingId ? appState.tasks.find((item) => item.id === appState.editingId) : null;
+  const isRecurringEdit = Boolean(existingTask && existingTask.repeat !== "none");
+  const allDay = Boolean(form.allDay?.checked);
+  const start = allDay ? "00:00" : normalizeTime(form.start?.value) || "";
+  const end = allDay ? "23:59" : normalizeTime(form.end?.value);
+
+  if (!allDay && !start) {
+    warning.textContent = "";
+    warning.classList.add("is-hidden");
+    return;
+  }
+
+  const draft = normalizeTask({
+    id: appState.editingId || "__draft__",
+    title: String(form.title?.value || "Новая задача").trim() || "Новая задача",
+    category: normalizeCategory(form.category?.value),
+    date,
+    start: start || "09:00",
+    end,
+    allDay,
+  });
+  const conflict = findTaskConflict(draft, date, {
+    excludeIds: getConflictExcludeIds(existingTask, isRecurringEdit),
+  });
+
+  if (!conflict) {
+    warning.textContent = "";
+    warning.classList.add("is-hidden");
+    return;
+  }
+
+  warning.textContent = `Это время уже занято задачей «${conflict.title}» (${formatTaskTimeRange(conflict)}). Можно сохранить, но лучше проверить расписание.`;
+  warning.classList.remove("is-hidden");
+}
+
+function findTaskConflict(candidateTask, dateISO, options = {}) {
+  const excludeIds = new Set(options.excludeIds || []);
+  const candidateInterval = getTaskInterval(candidateTask);
+  if (!candidateInterval) return null;
+
+  return getTasksForDate(dateISO)
+    .filter((task) => !excludeIds.has(task.id) && !excludeIds.has(task.sourceTaskId))
+    .sort(compareTaskTime)
+    .find((task) => {
+      const interval = getTaskInterval(task);
+      return interval && intervalsOverlap(candidateInterval, interval);
+    }) || null;
+}
+
+function getConflictExcludeIds(existingTask, isRecurringEdit) {
+  if (!existingTask) return [];
+  return [
+    existingTask.id,
+    existingTask.sourceTaskId,
+    isRecurringEdit ? existingTask.id : "",
+  ].filter(Boolean);
+}
+
+function getTaskInterval(task) {
+  if (task.allDay) return { start: 0, end: 1440, allDay: true };
+  const start = timeToMinutes(task.start || "09:00");
+  if (!Number.isFinite(start)) return null;
+  const end = task.end ? timeToMinutes(task.end) : start;
+  if (!Number.isFinite(end) || end < start) return null;
+  return { start, end, allDay: false };
+}
+
+function intervalsOverlap(first, second) {
+  const firstIsPoint = first.start === first.end;
+  const secondIsPoint = second.start === second.end;
+
+  if (firstIsPoint && secondIsPoint) return first.start === second.start;
+  if (firstIsPoint) return first.start >= second.start && first.start < second.end;
+  if (secondIsPoint) return second.start >= first.start && second.start < first.end;
+  return first.start < second.end && second.start < first.end;
+}
+
+function formatTaskTimeRange(task) {
+  if (task.allDay) return "весь день";
+  if (task.end) return `${task.start}–${task.end}`;
+  return task.start || "без точного времени";
 }
 
 function toggleComplete(taskId, dateISO) {
@@ -1815,6 +2706,7 @@ function requestTaskMove(taskId, fromDate, targetDate) {
 function moveTaskToDate(taskId, fromDate, targetDate, options = {}) {
   const task = appState.tasks.find((item) => item.id === taskId);
   if (!task) return;
+  let movedTaskForConflict = null;
 
   if (task.repeat !== "none" && occursOn(task, fromDate)) {
     if (!options.confirmed) {
@@ -1833,12 +2725,18 @@ function moveTaskToDate(taskId, fromDate, targetDate, options = {}) {
       sourceTaskId: task.id,
       createdAt: Date.now(),
     });
+    movedTaskForConflict = movedTask;
 
     appState.tasks = [
       ...appState.tasks.map((item) => (item.id === task.id ? addRecurrenceException(item, fromDate) : item)),
       movedTask,
     ];
   } else {
+    movedTaskForConflict = normalizeTask({
+      ...task,
+      date: targetDate,
+      completedDates: (task.completedDates || []).map((date) => (date === fromDate ? targetDate : date)),
+    });
     appState.tasks = appState.tasks.map((item) => {
       if (item.id !== taskId) return item;
       const completedDates = (item.completedDates || []).map((date) => (date === fromDate ? targetDate : date));
@@ -1850,7 +2748,16 @@ function moveTaskToDate(taskId, fromDate, targetDate, options = {}) {
   appState.pendingMove = null;
   appState.overloadDate = null;
   appState.selectedDate = targetDate;
-  showToast("Задача перенесена. Я сохранила новый фокус дня.");
+  const conflict = movedTaskForConflict
+    ? findTaskConflict(movedTaskForConflict, targetDate, {
+        excludeIds: getConflictExcludeIds(movedTaskForConflict, false),
+      })
+    : null;
+  showToast(
+    conflict
+      ? `Задача перенесена, но это время уже занято задачей «${conflict.title}» (${formatTaskTimeRange(conflict)}).`
+      : "Задача перенесена. Я сохранила новый фокус дня.",
+  );
 }
 
 function findNearestLightDay(dateISO) {
@@ -2074,15 +2981,15 @@ function isCompleted(task, dateISO) {
 
 function getGreeting() {
   const hour = new Date().getHours();
-  if (hour < 12) return "С добрым утром! У тебя всё под контролем, я присмотрю за деталями.";
-  if (hour < 18) return "Ты уже многое успела. Продолжай в своём ритме.";
-  return "Отличный день! Ты сделала всё, что было в твоих силах.";
+  if (hour < 12) return "С добрым утром! У тебя всё под контролем, я присмотрю за деталями";
+  if (hour < 18) return "Ты уже многое успела. Продолжай в своём ритме";
+  return "Отличный день! Ты сделала всё, что было в твоих силах";
 }
 
 function getAffirmation(stats, overdueCount) {
-  if (overdueCount) return "Ты просто перераспределяешь фокус. Это мудро.";
-  if (!stats.total || stats.completed / stats.total < 0.5) return "Качественный отдых — это тоже часть большого плана.";
-  return "Ты невероятно продуктивна. Твоя энергия направлена точно в цель.";
+  if (overdueCount) return "Ты просто перераспределяешь фокус. Это мудро";
+  if (!stats.total || stats.completed / stats.total < 0.5) return "Качественный отдых — это тоже часть большого плана";
+  return "Ты невероятно продуктивна. Твоя энергия направлена точно в цель";
 }
 
 function getActiveTasks(tasks, dateISO) {
@@ -2338,6 +3245,13 @@ function formatDateTimeInput(date) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+function formatFileSize(sizeBytes) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return "0 Б";
+  if (sizeBytes < 1024) return `${sizeBytes} Б`;
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} КБ`;
+  return `${(sizeBytes / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`;
+}
+
 function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -2368,5 +3282,6 @@ function registerServiceWorker() {
 }
 
 render();
+loadServerTasks();
 registerServiceWorker();
 window.setInterval(checkReminders, 30000);
